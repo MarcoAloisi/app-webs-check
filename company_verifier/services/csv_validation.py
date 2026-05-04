@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 from collections.abc import Iterable
 
@@ -40,12 +41,10 @@ def _decode_bytes(raw: bytes) -> tuple[str, str]:
     return raw.decode("utf-8", errors="replace"), "utf-8-replace"
 
 
-
 def _drop_empty_rows(frame: pd.DataFrame) -> pd.DataFrame:
     cleaned = frame.fillna("")
     mask = cleaned.apply(lambda row: any(str(value).strip() for value in row), axis=1)
     return cleaned[mask].copy()
-
 
 
 def _normalize_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
@@ -54,20 +53,54 @@ def _normalize_dataframe(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-
 def _build_issues(row_numbers: Iterable[int], message: str, severity: str = "warning") -> ValidationIssue:
     return ValidationIssue(severity=severity, message=message, row_numbers=list(row_numbers))
 
+
+def _read_csv_with_fallbacks(decoded: str) -> pd.DataFrame:
+    candidates: list[str | None] = [None, ",", ";", "\t", "|"]
+    best_frame: pd.DataFrame | None = None
+    best_score = -1
+
+    for separator in candidates:
+        try:
+            common_kwargs = {
+                "dtype": str,
+                "keep_default_na": False,
+                "skipinitialspace": True,
+            }
+            if separator is None:
+                frame = pd.read_csv(io.StringIO(decoded), sep=None, engine="python", **common_kwargs)
+            else:
+                frame = pd.read_csv(io.StringIO(decoded), sep=separator, **common_kwargs)
+        except (pd.errors.ParserError, csv.Error, UnicodeError):
+            continue
+
+        normalized_columns = {normalize_column_name(column) for column in frame.columns}
+        score = len(REQUIRED_COLUMNS.intersection(normalized_columns))
+        if score > best_score:
+            best_score = score
+            best_frame = frame
+        if score == len(REQUIRED_COLUMNS):
+            return frame
+
+    if best_frame is not None:
+        return best_frame
+    return pd.read_csv(io.StringIO(decoded), dtype=str, keep_default_na=False)
 
 
 def load_csv_bytes(raw: bytes) -> tuple[pd.DataFrame, UploadValidationResult]:
     """Load and validate an uploaded CSV or checkpoint file."""
     decoded, encoding = _decode_bytes(raw)
-    frame = pd.read_csv(io.StringIO(decoded), dtype=str, keep_default_na=False)
+    frame = _read_csv_with_fallbacks(decoded)
     frame = _drop_empty_rows(_normalize_dataframe(frame))
     missing = REQUIRED_COLUMNS - set(frame.columns)
     if missing:
-        raise ValueError(f"Faltan columnas requeridas: {', '.join(sorted(missing))}")
+        raise ValueError(
+            "Faltan columnas requeridas: "
+            f"{', '.join(sorted(missing))}. "
+            "Asegúrate de subir un CSV con cabecera y separador estándar (coma, punto y coma, tab o pipe)."
+        )
 
     frame["nombre_empresa"] = frame["nombre_empresa"].astype(str).str.strip()
     frame["web"] = frame["web"].astype(str).str.strip()
@@ -121,7 +154,6 @@ def load_csv_bytes(raw: bytes) -> tuple[pd.DataFrame, UploadValidationResult]:
         is_checkpoint_file=RESULT_COLUMNS.issubset(set(frame.columns)),
     )
     return frame.reset_index(drop=True), validation
-
 
 
 def extract_completed_results(frame: pd.DataFrame) -> list[dict[str, str]]:
