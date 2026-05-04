@@ -54,12 +54,95 @@ class ResultValidationService:
                     }
                 )
                 if len(result.pasos_verificados) == 7:
+                    result = self._apply_conservative_legitimacy_guards(result)
+                    result = self._apply_conservative_score_caps(result)
                     if result.score_confianza < manual_review_threshold:
                         result.requiere_revision_manual = True
                     return result
             except ValidationError:
                 pass
         return self._fallback(company, web_evidence, envelope, manual_review_threshold, web_search_enabled)
+
+    def _extract_conservative_markers(self, result: CompanyVerificationResult) -> dict[str, bool]:
+        flags_text = " | ".join(result.banderas_rojas).lower()
+        justification_text = result.justificacion_detallada.lower()
+        combined_text = f"{flags_text} | {justification_text}"
+
+        severe_discontinuity_markers = (
+            "liquid",
+            "disuelt",
+            "cerrad",
+            "out of business",
+            "inactiv",
+            "discontinu",
+        )
+        domain_failure_markers = (
+            "no resuelve",
+            "dominio caído",
+            "dominio expir",
+            "expirad",
+            "parking",
+            "parquead",
+        )
+        mismatch_markers = (
+            "desajuste",
+            "mismatch",
+            "sin conexión confirmada",
+            "cambio de titular",
+            "marca distinta",
+        )
+        absent_presence_markers = (
+            "ausencia de presencia digital",
+            "sin linkedin",
+            "sin actividad reciente",
+            "sin noticias recientes",
+            "sin continuidad operativa",
+        )
+        return {
+            "severe_discontinuity": any(marker in combined_text for marker in severe_discontinuity_markers),
+            "domain_failure": any(marker in combined_text for marker in domain_failure_markers),
+            "mismatch": any(marker in combined_text for marker in mismatch_markers),
+            "absent_presence": any(marker in combined_text for marker in absent_presence_markers),
+        }
+
+    def _apply_conservative_legitimacy_guards(self, result: CompanyVerificationResult) -> CompanyVerificationResult:
+        markers = self._extract_conservative_markers(result)
+        should_downgrade_legitimacy = False
+
+        if result.legitima == LegitimacyAnswer.YES:
+            if markers["severe_discontinuity"] and (markers["domain_failure"] or markers["absent_presence"]):
+                should_downgrade_legitimacy = True
+            elif result.operativa == TernaryAnswer.NO and (markers["mismatch"] or markers["absent_presence"]):
+                should_downgrade_legitimacy = True
+            elif result.riesgo_fraude == RiskLevel.HIGH:
+                should_downgrade_legitimacy = True
+
+        if should_downgrade_legitimacy:
+            result.legitima = LegitimacyAnswer.SUSPICIOUS
+            result.requiere_revision_manual = True
+            downgrade_flag = "La legitimidad actual no queda confirmada por discontinuidad operativa o inconsistencia dominio-entidad."
+            if downgrade_flag not in result.banderas_rojas:
+                result.banderas_rojas.append(downgrade_flag)
+
+        return result
+
+    def _apply_conservative_score_caps(self, result: CompanyVerificationResult) -> CompanyVerificationResult:
+        max_score = 100
+        markers = self._extract_conservative_markers(result)
+
+        if result.operativa == TernaryAnswer.NO:
+            max_score = min(max_score, 59)
+        if result.requiere_revision_manual and result.riesgo_fraude != RiskLevel.LOW:
+            max_score = min(max_score, 69)
+        if markers["severe_discontinuity"]:
+            max_score = min(max_score, 35)
+        if result.operativa == TernaryAnswer.NO and markers["domain_failure"]:
+            max_score = min(max_score, 30)
+        if markers["mismatch"] and markers["absent_presence"]:
+            max_score = min(max_score, 45)
+
+        result.score_confianza = min(result.score_confianza, max_score)
+        return result
 
     def _fallback(
         self,

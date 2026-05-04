@@ -20,6 +20,15 @@ Reglas obligatorias:
 - Si detectas que el dominio actual ya no representa a la empresa original, debes indicarlo explícitamente y tratar de identificar el dominio oficial actual. Si no puedes confirmarlo, indícalo como no identificable.
 - La justificación debe citar evidencias textuales concretas del sitio o de las fuentes entregadas.
 - Si detectas contradicciones, señales de fraude, cambio de titularidad, score bajo o falta de evidencia crítica, requiere_revision_manual debe ser true.
+- El score_confianza debe reflejar continuidad operativa y consistencia global, no solo existencia legal histórica.
+- No otorgues scores altos por el mero hecho de encontrar un registro mercantil o una antigua ficha corporativa si la empresa aparece liquidada, cerrada, out of business, sin actividad reciente o con dominio caído.
+- Regla de severidad: si la empresa está liquidada, cerrada, inactiva, out of business o sin continuidad operativa verificable, el score_confianza normalmente debe quedar por debajo de 40.
+- Regla de severidad: si el dominio no resuelve, no hay presencia digital actual fiable y además hay desajuste entre la entidad legal y el dominio o la marca, el score_confianza normalmente debe quedar por debajo de 30.
+- Regla de coherencia: si operativa es 'no', el score_confianza no debe ser alto; evita scores >= 70 salvo evidencia excepcional y muy bien justificada, lo cual será extremadamente raro.
+- Penaliza fuertemente señales acumuladas como dominio expirado/no resuelve, empresa liquidada, ausencia de LinkedIn corporativo actual, ausencia de noticias recientes, mismatch de nombres o marca, y falta de dominio sucesor confirmado.
+- La etiqueta legitima='si' exige evidencia actual y consistente de identidad corporativa válida; no basta con existencia histórica en registros.
+- Si la empresa existió pero está liquidada, cerrada, out of business o sin continuidad digital verificable, evita legitima='si'; usa normalmente 'sospechosa' salvo evidencia excepcional de sucesión o continuidad corporativa clara.
+- Si además existe desajuste entre entidad legal, marca y dominio, la legitimidad no debe clasificarse como afirmativa.
 """
 
 
@@ -153,6 +162,11 @@ def build_verification_prompt(
             "Cuando la evidencia apunte a un dominio nuevo, redirección corporativa, adquisición o rebranding, refléjalo también en web_verificada, fuentes y justificacion_detallada.",
             "Si usas LinkedIn, noticias u otras fuentes externas, cita la evidencia de forma concreta y conservadora sin inventar URLs no observadas.",
             "No afirmes que una empresa está activa solo porque el dominio cargue; busca señales adicionales de actividad real cuando sea posible.",
+            "Ajusta el score_confianza de forma conservadora: registro histórico o existencia legal no equivalen a continuidad operativa actual.",
+            "Si la evidencia combina empresa liquidada o out of business + dominio no resuelve o presencia digital ausente + mismatch de nombre, el score_confianza debe quedar claramente bajo, normalmente por debajo de 30-40.",
+            "Si operativa = no o requiere_revision_manual = true por contradicciones materiales, evita scores altos o cercanos a 75 salvo justificación excepcional basada en evidencia sólida y actual.",
+            "No marques legitima = si cuando solo exista evidencia histórica o registral pero no continuidad operativa/digital actual.",
+            "Si la empresa está liquidada, out of business o sin continuidad verificable, usa normalmente legitima = sospechosa, especialmente si el dominio no resuelve o hay mismatch con la marca.",
             "No añadas markdown, ni comentarios, ni texto fuera del JSON.",
         ],
     }
