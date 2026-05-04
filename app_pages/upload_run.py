@@ -113,51 +113,63 @@ def _refresh_checkpoint() -> None:
 
 
 def _process_next_batch() -> None:
-    pending = _pending_rows()
-    if not pending:
-        st.session_state["run_status"] = "completed"
-        update_metrics(finished_at=time.time())
-        _refresh_checkpoint()
-        append_log("No quedan empresas pendientes.")
-        return
+    try:
+        pending = _pending_rows()
+        if not pending:
+            st.session_state["run_status"] = "completed"
+            update_metrics(finished_at=time.time())
+            _refresh_checkpoint()
+            append_log("No quedan empresas pendientes.")
+            return
 
-    settings = get_settings()
-    current_batch = pending[: settings.batch_size]
-    estimator = _cost_service.estimate(current_batch, settings)
-    orchestrator = VerificationOrchestrator(_get_api_key())
-    batch_results = orchestrator.process_batch(current_batch, settings, log_callback=append_log)
-    results_by_hash = dict(st.session_state.get("results_by_hash", {}))
-    result_list = list(st.session_state.get("results", []))
-    for row, result in zip(current_batch, batch_results, strict=False):
+        settings = get_settings()
+        current_row = pending[0]
+        metrics = get_metrics()
+        current_position = metrics.processed_rows + 1
+        batch_number = ((current_position - 1) // settings.batch_size) + 1
+        batch_offset = (current_position - 1) % settings.batch_size + 1
+        append_log(
+            f"Procesando empresa {current_position}/{metrics.total_rows or len(_current_rows())} · "
+            f"batch {batch_number} · elemento {batch_offset}/{settings.batch_size}: {current_row.nombre_empresa}"
+        )
+        estimator = _cost_service.estimate([current_row], settings)
+        orchestrator = VerificationOrchestrator(_get_api_key())
+        result = orchestrator.process_company(current_row, settings=settings, log_callback=append_log)
+        results_by_hash = dict(st.session_state.get("results_by_hash", {}))
+        result_list = list(st.session_state.get("results", []))
         serialized = result.model_dump(mode="json")
-        results_by_hash[row.record_hash] = serialized
+        results_by_hash[current_row.record_hash] = serialized
         result_list.append(serialized)
-        st.session_state["last_processed_hash"] = row.record_hash
-    st.session_state["results_by_hash"] = results_by_hash
-    st.session_state["results"] = result_list
+        st.session_state["last_processed_hash"] = current_row.record_hash
+        st.session_state["results_by_hash"] = results_by_hash
+        st.session_state["results"] = result_list
 
-    metrics = get_metrics()
-    processed_rows = metrics.processed_rows + len(batch_results)
-    update_metrics(
-        processed_rows=processed_rows,
-        completed_rows=len(result_list),
-        batches_completed=metrics.batches_completed + 1,
-        estimated_cost_usd=round(metrics.estimated_cost_usd + estimator.estimated_cost_usd, 4),
-    )
-    append_log(f"Batch completado con {len(batch_results)} empresas.")
+        processed_rows = metrics.processed_rows + 1
+        update_metrics(
+            processed_rows=processed_rows,
+            completed_rows=len(result_list),
+            batches_completed=processed_rows // settings.batch_size,
+            estimated_cost_usd=round(metrics.estimated_cost_usd + estimator.estimated_cost_usd, 4),
+        )
+        append_log(f"Empresa completada: {current_row.nombre_empresa}")
 
-    is_checkpoint_turn = processed_rows % settings.checkpoint_interval == 0
-    if is_checkpoint_turn or st.session_state.get("stop_requested") or len(_pending_rows()) == 0:
-        _refresh_checkpoint()
+        is_checkpoint_turn = processed_rows % settings.checkpoint_interval == 0
+        if is_checkpoint_turn or st.session_state.get("stop_requested") or len(_pending_rows()) == 0:
+            _refresh_checkpoint()
 
-    if st.session_state.get("stop_requested"):
-        st.session_state["run_status"] = "stopped"
+        if st.session_state.get("stop_requested"):
+            st.session_state["run_status"] = "stopped"
+            update_metrics(finished_at=time.time())
+            append_log("Ejecución detenida por el usuario.")
+        elif not _pending_rows():
+            st.session_state["run_status"] = "completed"
+            update_metrics(finished_at=time.time())
+            append_log("Ejecución finalizada.")
+    except Exception as exc:  # noqa: BLE001
+        st.session_state["run_status"] = "failed"
         update_metrics(finished_at=time.time())
-        append_log("Ejecución detenida por el usuario.")
-    elif not _pending_rows():
-        st.session_state["run_status"] = "completed"
-        update_metrics(finished_at=time.time())
-        append_log("Ejecución finalizada.")
+        append_log(f"Error durante el batch: {exc}")
+        raise
 
 
 
@@ -207,6 +219,7 @@ if rows:
 control_cols = st.columns([1, 1, 1, 2])
 if control_cols[0].button("Iniciar / reanudar", type="primary", disabled=not rows or st.session_state.get("run_status") == "running"):
     _start_run()
+    _process_next_batch()
     st.rerun()
 if control_cols[1].button("Detener", disabled=st.session_state.get("run_status") != "running"):
     _request_stop()
