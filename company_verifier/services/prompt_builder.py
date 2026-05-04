@@ -7,16 +7,19 @@ from typing import Any
 
 from company_verifier.models import CompanyInput
 
-SYSTEM_PROMPT = """Eres un analista senior de verificación corporativa. Debes evaluar legitimidad y estado operativo de una empresa con un enfoque conservador, auditable y antifabulación.
+SYSTEM_PROMPT = """Eres un analista senior de ciberseguridad, OSINT y verificación corporativa. Debes evaluar legitimidad, estado operativo, riesgo de fraude y continuidad digital de una empresa con un enfoque conservador, auditable y antifabulación.
 
 Reglas obligatorias:
-- Nunca inventes fuentes, datos, registros ni fechas.
-- Debes devolver SOLO JSON válido.
+- Nunca inventes fuentes, datos, registros, dominios, perfiles, fechas ni conclusiones.
+- Debes devolver SOLO JSON válido que respete exactamente la estructura pedida.
 - Completa exactamente 7 pasos verificados, uno por cada paso pedido.
-- Si una evidencia falta o es débil, usa status 'not_verifiable'.
-- Distingue entre ausencia de evidencia y evidencia negativa.
-- Si detectas contradicciones o score bajo, requiere_revision_manual debe ser true.
+- Si una evidencia falta, es ambigua o es insuficiente, usa status 'not_verifiable'.
+- Distingue siempre entre ausencia de evidencia, evidencia negativa y evidencia contradictoria.
+- Prioriza fuentes oficiales o reputadas: sitio oficial, LinkedIn corporativo, noticias fiables, registros mercantiles, directorios empresariales serios y páginas de empleo oficiales.
+- Cuando web_search_habilitado sea true, debes investigar en profundidad la empresa detrás del dominio, incluyendo señales de continuidad operativa, rebranding, adquisición, cambio de dominio, redirecciones y presencia actual en LinkedIn.
+- Si detectas que el dominio actual ya no representa a la empresa original, debes indicarlo explícitamente y tratar de identificar el dominio oficial actual. Si no puedes confirmarlo, indícalo como no identificable.
 - La justificación debe citar evidencias textuales concretas del sitio o de las fuentes entregadas.
+- Si detectas contradicciones, señales de fraude, cambio de titularidad, score bajo o falta de evidencia crítica, requiere_revision_manual debe ser true.
 """
 
 
@@ -28,7 +31,11 @@ def build_verification_prompt(
 ) -> str:
     """Build the user prompt sent to the LLM."""
     prompt_payload = {
-        "objetivo": "Verificar rigurosamente una empresa y su sitio web siguiendo 7 pasos obligatorios.",
+        "objetivo": (
+            "Verificar rigurosamente una empresa y su dominio con enfoque de ciberseguridad y OSINT, "
+            "determinando actividad real del dominio, actualidad del contenido, existencia de la empresa, "
+            "continuidad operativa, legitimidad, riesgo de fraude y posible migración a dominios nuevos u oficiales."
+        ),
         "empresa": {
             "nombre_empresa": company.nombre_empresa,
             "web_input": company.web,
@@ -37,10 +44,87 @@ def build_verification_prompt(
         },
         "web_search_habilitado": enable_web_search,
         "evidencia_precolectada": web_evidence,
+        "criterios_de_investigacion": [
+            "No te limites a comprobar si la web carga; debes investigar la empresa real detrás del dominio.",
+            "Determina si el dominio resuelve, si el sitio sirve contenido real y si existen redirecciones a otro dominio, subdominio, LinkedIn, GitHub o web corporativa matriz.",
+            "Busca evidencia visible y fechada de actualización reciente del sitio, idealmente dentro de los últimos 3 a 6 meses.",
+            "Identifica el nombre de la empresa, su país o región principal y su sector, usando tanto la web como fuentes reputadas.",
+            "Comprueba si la empresa sigue operando mediante LinkedIn corporativo, noticias recientes, ofertas de empleo, directorios empresariales, registros o comunicados oficiales.",
+            "Verifica expresamente si el dominio cambió de propietario, propósito o marca, o si la empresa migró a otro dominio oficial.",
+            "Si detectas un cambio de dominio, rebranding o adquisición, intenta identificar el dominio principal actual y explica brevemente qué cambió y cuándo pudo ocurrir aproximadamente.",
+            "Si no encuentras un dominio nuevo o alternativo fiable para la misma empresa, indícalo explícitamente como no identificado.",
+            "Evalúa legitimidad y riesgo con base en señales positivas y red flags: branding consistente, contacto verificable, cobertura reputada, registros fiables, advertencias de phishing, typosquatting, parking o contenido sospechoso.",
+            "Si web_search_habilitado es false, no inventes búsquedas externas y limita los pasos externos a la evidencia ya disponible; si es true, úsalo para profundizar especialmente en LinkedIn, noticias y posibles dominios alternativos.",
+        ],
+        "pasos_obligatorios": [
+            {
+                "step_number": 1,
+                "name": "Actividad real del dominio",
+                "debes_verificar": [
+                    "Resolución o accesibilidad del dominio/sitio",
+                    "Contenido real vs parking, venta, suspensión o placeholder",
+                    "Redirecciones relevantes y dominio final",
+                ],
+            },
+            {
+                "step_number": 2,
+                "name": "Recencia del contenido web",
+                "debes_verificar": [
+                    "Evidencia fechada visible en noticias, blog, press release, eventos, anuncios o footer",
+                    "Si el contenido parece actualizado en los últimos 3 a 6 meses",
+                    "Explicación breve si la recencia es negativa o indeterminada",
+                ],
+            },
+            {
+                "step_number": 3,
+                "name": "Identificación de la empresa",
+                "debes_verificar": [
+                    "Nombre real de la empresa u organización asociada al dominio",
+                    "Coincidencia entre marca, dominio, textos del sitio y empresa declarada",
+                    "País o región principal y sector cuando sea posible",
+                ],
+            },
+            {
+                "step_number": 4,
+                "name": "Validación cruzada externa",
+                "debes_verificar": [
+                    "LinkedIn corporativo actual",
+                    "Noticias recientes, directorios, registros, perfiles oficiales o páginas de empleo",
+                    "Evidencia de continuidad operativa, adquisición, rebranding o cierre",
+                ],
+            },
+            {
+                "step_number": 5,
+                "name": "Legitimidad y riesgo",
+                "debes_verificar": [
+                    "Consistencia de branding, contacto, dirección y datos legales",
+                    "Señales de phishing, malware, scam, impersonación o typosquatting",
+                    "Clasificación conservadora del riesgo y tipología detectada",
+                ],
+            },
+            {
+                "step_number": 6,
+                "name": "Estado operativo actual",
+                "debes_verificar": [
+                    "Si la empresa existe actualmente y parece operativa",
+                    "Si parece defunta, adquirida, renombrada o inactiva",
+                    "Distinción entre empresa legítima no operativa y dominio sospechoso",
+                ],
+            },
+            {
+                "step_number": 7,
+                "name": "Dominio oficial actual o alternativo",
+                "debes_verificar": [
+                    "Si el dominio original dejó de ser el principal o cambió de propósito",
+                    "Cuál sería el dominio oficial actual, alternativo o sucesor de la misma empresa",
+                    "Si no se identifica ninguno, indicarlo de forma explícita",
+                ],
+            },
+        ],
         "salida_requerida": {
             "nombre_empresa": "str",
             "web_input": "str",
-            "web_verificada": "str|null",
+            "web_verificada": "str|null (dominio o URL oficial actual confirmada; si no puede confirmarse, null)",
             "existe": "si|no|indeterminado",
             "operativa": "si|no|indeterminado",
             "legitima": "si|no|sospechosa",
@@ -66,6 +150,9 @@ def build_verification_prompt(
         "instrucciones": [
             "No concluyas hasta reflejar los 7 pasos.",
             "El paso 4 solo puede usar búsqueda externa si web_search_habilitado es true; si no, marca not_verifiable.",
+            "Cuando la evidencia apunte a un dominio nuevo, redirección corporativa, adquisición o rebranding, refléjalo también en web_verificada, fuentes y justificacion_detallada.",
+            "Si usas LinkedIn, noticias u otras fuentes externas, cita la evidencia de forma concreta y conservadora sin inventar URLs no observadas.",
+            "No afirmes que una empresa está activa solo porque el dominio cargue; busca señales adicionales de actividad real cuando sea posible.",
             "No añadas markdown, ni comentarios, ni texto fuera del JSON.",
         ],
     }

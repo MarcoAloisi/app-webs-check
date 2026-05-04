@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
+
 from company_verifier.models import AppSettings, CompanyInput
 from company_verifier.services.openrouter_client import _build_extra_body
+from company_verifier.services.prompt_builder import SYSTEM_PROMPT, build_verification_prompt
 from company_verifier.services.verification_orchestrator import VerificationOrchestrator, _build_web_search_options
 
 
@@ -59,3 +62,31 @@ def test_langgraph_orchestrator_returns_conservative_result_without_api_key() ->
     assert len(result.pasos_verificados) == 7
     assert result.requiere_revision_manual is True
     assert result.web_input == "https://example.com"
+
+
+def test_prompt_requires_deep_osint_and_linkedin_checks() -> None:
+    company = CompanyInput(
+        row_number=7,
+        nombre_empresa="Example Corp",
+        web="https://example.com",
+        web_normalized="https://example.com",
+        domain_normalized="example.com",
+        record_hash="hash-example-5678",
+    )
+
+    prompt = build_verification_prompt(
+        company,
+        {"final_url": "https://example.com", "status_code": 200},
+        enable_web_search=True,
+    )
+
+    assert "LinkedIn corporativo actual" in prompt
+    assert "dominio oficial actual, alternativo o sucesor" in prompt
+    assert "No te limites a comprobar si la web carga" in prompt
+    assert "web_verificada" in prompt
+
+
+def test_system_prompt_enforces_conservative_domain_change_analysis() -> None:
+    assert "cambio de dominio" in SYSTEM_PROMPT
+    assert "LinkedIn" in SYSTEM_PROMPT
+    assert re.search(r"SOLO JSON válido", SYSTEM_PROMPT) is not None
