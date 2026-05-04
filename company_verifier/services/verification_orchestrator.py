@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any, Literal
 from typing_extensions import TypedDict
 
-import streamlit as st
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -28,17 +28,17 @@ class VerificationGraphState(TypedDict, total=False):
     final_result: CompanyVerificationResult
 
 
-@st.cache_data(ttl=86_400, show_spinner=False)
+@lru_cache(maxsize=512)
 def _verify_company_cached(
-    row_data: dict[str, object],
-    settings_data: dict[str, object],
+    row_payload: str,
+    settings_payload: str,
     api_key: str | None,
-) -> dict[str, object]:
-    row = CompanyInput.model_validate(row_data)
-    settings = AppSettings.model_validate(settings_data)
+) -> str:
+    row = CompanyInput.model_validate_json(row_payload)
+    settings = AppSettings.model_validate_json(settings_payload)
     workflow = VerificationWorkflow(api_key)
     result = workflow.invoke(row, settings)
-    return result.model_dump(mode="json")
+    return result.model_dump_json()
 
 
 class VerificationWorkflow:
@@ -194,8 +194,8 @@ class VerificationOrchestrator:
             log_callback(f"Ejecutando workflow LangGraph para {row.nombre_empresa}")
             if settings.enable_web_search:
                 log_callback("Web search de OpenRouter solicitado para esta ejecución.")
-        payload = _verify_company_cached(row.model_dump(mode="json"), settings.model_dump(mode="json"), self._api_key)
-        return CompanyVerificationResult.model_validate(payload)
+        payload = _verify_company_cached(row.model_dump_json(), settings.model_dump_json(), self._api_key)
+        return CompanyVerificationResult.model_validate_json(payload)
 
 
 def _build_web_search_options(settings: AppSettings) -> dict[str, Any]:

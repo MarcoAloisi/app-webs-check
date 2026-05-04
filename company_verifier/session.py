@@ -11,6 +11,7 @@ import streamlit as st
 from company_verifier.config import (
     CHECKPOINT_INTERVAL,
     DEFAULT_BATCH_SIZE,
+    DEFAULT_ENABLE_WEB_SEARCH,
     DEFAULT_FALLBACK_MODEL,
     DEFAULT_MANUAL_REVIEW_THRESHOLD,
     DEFAULT_MAX_TOKENS,
@@ -27,6 +28,7 @@ DEFAULT_SETTINGS = AppSettings(
     max_tokens=DEFAULT_MAX_TOKENS,
     batch_size=DEFAULT_BATCH_SIZE,
     manual_review_threshold=DEFAULT_MANUAL_REVIEW_THRESHOLD,
+    enable_web_search=DEFAULT_ENABLE_WEB_SEARCH,
     checkpoint_interval=CHECKPOINT_INTERVAL,
 )
 

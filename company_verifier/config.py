@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 APP_TITLE = "Verificador masivo de empresas"
-DEFAULT_MODEL = "openai/gpt-4o-mini"
+DEFAULT_MODEL = "x-ai/grok-4.1-fast"
 DEFAULT_FALLBACK_MODEL = "anthropic/claude-3.5-haiku"
+DEFAULT_ENABLE_WEB_SEARCH = True
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_MAX_TOKENS = 1800
 DEFAULT_BATCH_SIZE = 30
@@ -19,6 +20,7 @@ DEFAULT_RETRY_ATTEMPTS = 4
 USER_AGENT = "app-webs-check/0.1 (+Streamlit Community Cloud)"
 
 DEFAULT_MODEL_OPTIONS = [
+    "x-ai/grok-4.1-fast",
     "openai/gpt-4o-mini",
     "anthropic/claude-3.5-haiku",
     "google/gemini-2.0-flash-001",
@@ -36,6 +38,7 @@ class CapabilityProfile:
 
 
 MODEL_CAPABILITIES: dict[str, CapabilityProfile] = {
+    "x-ai/grok-4.1-fast": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
     "openai/gpt-4o-mini": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
     "anthropic/claude-3.5-haiku": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
     "google/gemini-2.0-flash-001": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
