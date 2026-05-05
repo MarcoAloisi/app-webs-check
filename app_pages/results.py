@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import io
 import json
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from company_verifier.models import CompanyVerificationResult
-from company_verifier.run_controller import current_results, drain_worker_events, worker_is_running
+from company_verifier.run_controller import drain_worker_events, worker_is_running
+from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names
 from company_verifier.services.export_service import ExportService
 
 _export_service = ExportService()
@@ -24,18 +27,82 @@ def _build_exports(results_data: tuple[str, ...]) -> tuple[bytes, bytes]:
     return _export_service.to_csv_bytes(results), _export_service.to_excel_bytes(results)
 
 
+@st.cache_data(show_spinner=False)
+def _sheet_names(file_name: str, raw_bytes: bytes) -> list[str]:
+    return list_sheet_names(raw_bytes, file_name)
+
+
+@st.cache_data(show_spinner=False)
+def _parse_results_upload(file_name: str, raw_bytes: bytes, sheet_name: str | None) -> tuple[str, ...]:
+    suffix = Path(file_name).suffix.lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(io.BytesIO(raw_bytes), dtype=str, keep_default_na=False)
+    elif suffix in {".xlsx", ".xls"}:
+        with pd.ExcelFile(io.BytesIO(raw_bytes), engine="xlrd" if suffix == ".xls" else "openpyxl") as workbook:
+            selected_sheet = sheet_name or workbook.sheet_names[0]
+            frame = pd.read_excel(workbook, sheet_name=selected_sheet, dtype=str, keep_default_na=False)
+    else:
+        raise ValueError("Formato no soportado. Sube un CSV, XLSX o XLS.")
+
+    frame = frame.fillna("")
+    records = extract_completed_results(frame)
+    if not records:
+        records = frame.to_dict(orient="records")
+    results = _export_service.from_flat_records(records)
+    return tuple(result.model_dump_json() for result in results)
+
+
 def _serialized_results() -> tuple[str, ...]:
     return tuple(CompanyVerificationResult.model_validate(item).model_dump_json() for item in st.session_state.get("results", []))
 
 
+def _resolve_results_source() -> tuple[tuple[str, ...], str | None]:
+    source = st.radio(
+        "Origen de resultados",
+        options=["Sesión actual", "Archivo externo"],
+        horizontal=True,
+    )
+    if source == "Sesión actual":
+        return _serialized_results(), "Mostrando resultados de la sesión actual."
+
+    uploaded_file = st.file_uploader(
+        "Subir resultados exportados o checkpoint",
+        type=["csv", "xlsx", "xls"],
+        key="results_upload_file",
+    )
+    if uploaded_file is None:
+        st.info("Sube un archivo de resultados para visualizarlo aquí sin reemplazar la sesión actual.")
+        return (), None
+
+    raw = uploaded_file.getvalue()
+    selected_sheet: str | None = None
+    sheet_names = _sheet_names(uploaded_file.name, raw)
+    if len(sheet_names) > 1:
+        selected_sheet = st.selectbox("Hoja", options=sheet_names, key="results_upload_sheet")
+
+    try:
+        serialized_results = _parse_results_upload(uploaded_file.name, raw, selected_sheet)
+    except ValueError as exc:
+        st.warning(str(exc))
+        return (), None
+
+    if not serialized_results:
+        st.warning("El archivo no contiene resultados procesados para mostrar.")
+        return (), None
+    return serialized_results, f"Mostrando resultados cargados desde {uploaded_file.name}."
+
+
 def _render_results_page() -> None:
     st.subheader("Resultados y filtros")
-    results = current_results()
-    if not results:
-        st.info("Todavía no hay resultados para mostrar.")
+    serialized_results, source_message = _resolve_results_source()
+    if not serialized_results:
+        if source_message is not None:
+            st.info("Todavía no hay resultados para mostrar.")
         return
 
-    serialized_results = _serialized_results()
+    if source_message:
+        st.caption(source_message)
+
     frame = _build_frame(serialized_results)
     status_options = ["todos", "si", "no", "indeterminado"]
     risk_options = ["todos", "bajo", "medio", "alto"]

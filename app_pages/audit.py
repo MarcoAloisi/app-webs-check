@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from company_verifier.models import CompanyVerificationResult
+from company_verifier.models import CompanyVerificationResult, LegitimacyAnswer, RiskLevel
 from company_verifier.run_controller import current_results, drain_worker_events, worker_is_running
+
+
+def _is_suspicious(result: CompanyVerificationResult) -> bool:
+    return (
+        result.requiere_revision_manual
+        or result.legitima != LegitimacyAnswer.YES
+        or result.riesgo_fraude == RiskLevel.HIGH
+    )
 
 
 def _render_audit_page() -> None:
@@ -13,7 +21,46 @@ def _render_audit_page() -> None:
         st.info("Todavía no hay resultados auditables.")
         return
 
-    options = {f"{item.nombre_empresa} · {item.web_input}": item for item in results}
+    status_options = ["todos", "si", "no", "indeterminado"]
+    risk_options = ["todos", "bajo", "medio", "alto"]
+    review_options = ["todos", "sí", "no"]
+
+    col1, col2, col3, col4 = st.columns(4)
+    exists_filter = col1.selectbox("Existe", status_options, key="audit_exists_filter")
+    operative_filter = col2.selectbox("Operativa", status_options, key="audit_operative_filter")
+    risk_filter = col3.selectbox("Riesgo", risk_options, key="audit_risk_filter")
+    review_filter = col4.selectbox("Revisión manual", review_options, key="audit_review_filter")
+
+    scores = [item.score_confianza for item in results]
+    score_range = st.slider(
+        "Rango de score",
+        min_value=min(scores),
+        max_value=max(scores),
+        value=(min(scores), max(scores)),
+        key="audit_score_range",
+    )
+    only_suspicious = st.checkbox("Solo sospechosas", value=False, key="audit_only_suspicious")
+
+    filtered_results = list(results)
+    if exists_filter != "todos":
+        filtered_results = [item for item in filtered_results if item.existe.value == exists_filter]
+    if operative_filter != "todos":
+        filtered_results = [item for item in filtered_results if item.operativa.value == operative_filter]
+    if risk_filter != "todos":
+        filtered_results = [item for item in filtered_results if item.riesgo_fraude.value == risk_filter]
+    if review_filter != "todos":
+        expected_review = review_filter == "sí"
+        filtered_results = [item for item in filtered_results if item.requiere_revision_manual == expected_review]
+    filtered_results = [item for item in filtered_results if score_range[0] <= item.score_confianza <= score_range[1]]
+    if only_suspicious:
+        filtered_results = [item for item in filtered_results if _is_suspicious(item)]
+
+    st.caption(f"Empresas visibles: {len(filtered_results)} de {len(results)}")
+    if not filtered_results:
+        st.warning("No hay empresas que cumplan los filtros seleccionados.")
+        return
+
+    options = {f"{item.nombre_empresa} · {item.web_input}": item for item in filtered_results}
     selected_label = st.selectbox("Empresa", options=list(options.keys()))
     selected = options[selected_label]
 

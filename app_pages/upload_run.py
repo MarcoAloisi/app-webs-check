@@ -16,6 +16,7 @@ from company_verifier.services.cost_estimator import CostEstimatorService
 from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names, load_tabular_bytes
 from company_verifier.services.export_service import ExportService
 from company_verifier.session import append_log, get_metrics, get_settings, reset_run_state, update_metrics
+from company_verifier.utils.web import build_record_hash, extract_domain, normalize_url
 
 _export_service = ExportService()
 _cost_service = CostEstimatorService()
@@ -42,6 +43,69 @@ def _get_api_key() -> str | None:
 
 def _current_rows() -> list[CompanyInput]:
     return [CompanyInput.model_validate(item) for item in st.session_state.get("upload_rows", [])]
+
+
+def _build_manual_company_input(company_name: str, website: str) -> CompanyInput:
+    normalized_name = company_name.strip()
+    normalized_input_url = normalize_url(website.strip()) if website.strip() else ""
+
+    if not normalized_name and not normalized_input_url:
+        raise ValueError("Debes indicar al menos el nombre de empresa o la web.")
+
+    if not normalized_name:
+        normalized_name = extract_domain(normalized_input_url) or normalized_input_url
+
+    raw_web = website.strip() or "No proporcionada"
+    if not normalized_input_url:
+        normalized_input_url = "https://unknown.invalid"
+
+    normalized_domain = extract_domain(normalized_input_url) or "unknown.invalid"
+    return CompanyInput(
+        row_number=2,
+        nombre_empresa=normalized_name,
+        web=raw_web,
+        web_normalized=normalized_input_url,
+        domain_normalized=normalized_domain,
+        record_hash=build_record_hash(normalized_name, normalized_input_url),
+    )
+
+
+def _load_manual_input(company_name: str, website: str) -> None:
+    row = _build_manual_company_input(company_name, website)
+    reset_run_state(keep_upload=False)
+    frame = pd.DataFrame(
+        [
+            {
+                "row_number": row.row_number,
+                "nombre_empresa": row.nombre_empresa,
+                "web": row.web,
+                "web_normalized": row.web_normalized,
+                "domain_normalized": row.domain_normalized,
+                "record_hash": row.record_hash,
+                "processing_status": row.processing_status.value,
+            }
+        ]
+    )
+    st.session_state["uploaded_filename"] = "entrada_manual"
+    st.session_state["uploaded_file_signature"] = None
+    st.session_state["uploaded_sheet_name"] = None
+    st.session_state["uploaded_sheet_names"] = []
+    st.session_state["source_dataframe"] = frame
+    st.session_state["upload_rows"] = [row.model_dump(mode="json")]
+    st.session_state["validation_summary"] = {"issues": []}
+    st.session_state["upload_issues"] = []
+    update_metrics(
+        total_rows=1,
+        processed_rows=0,
+        completed_rows=0,
+        batches_completed=0,
+        failed_rows=0,
+        estimated_cost_usd=0.0,
+        accumulated_row_seconds=0.0,
+        started_at=None,
+        finished_at=None,
+    )
+    append_log(f"Entrada manual preparada para {row.nombre_empresa}.")
 
 
 def _load_upload(file_name: str, raw: bytes, *, file_signature: str, sheet_name: str | None) -> None:
@@ -250,37 +314,6 @@ def _avg_row_time_text() -> str:
     return _duration_text(average_seconds)
 
 
-st.subheader("Carga del CSV y control de ejecución")
-with st.container(border=True):
-    uploaded_file = st.file_uploader(
-        "Archivo de entrada o checkpoint",
-        type=["csv", "xlsx", "xls"],
-        disabled=worker_is_running(),
-    )
-    if uploaded_file is not None:
-        raw = uploaded_file.getvalue()
-        file_signature = hashlib.sha256(raw).hexdigest()
-        sheet_names = _sheet_names(uploaded_file.name, raw)
-        st.session_state["uploaded_sheet_names"] = sheet_names
-        selected_sheet = sheet_names[0] if len(sheet_names) == 1 else st.session_state.get("uploaded_sheet_name")
-        if len(sheet_names) > 1:
-            selected_sheet = st.selectbox(
-                "Hoja",
-                options=sheet_names,
-                index=(sheet_names.index(selected_sheet) if selected_sheet in sheet_names else 0),
-            )
-        should_reload = (
-            file_signature != st.session_state.get("uploaded_file_signature")
-            or selected_sheet != st.session_state.get("uploaded_sheet_name")
-        )
-        if should_reload:
-            _load_upload(uploaded_file.name, raw, file_signature=file_signature, sheet_name=selected_sheet)
-    else:
-        st.session_state["uploaded_sheet_names"] = []
-
-drain_worker_events()
-
-
 def _start_run() -> None:
     if worker_is_running():
         return
@@ -320,6 +353,61 @@ def _start_run() -> None:
     st.session_state["batch_stop_event"] = stop_event
     st.session_state["batch_worker"] = worker
     worker.start()
+
+
+st.subheader("Carga del CSV y control de ejecución")
+with st.container(border=True):
+    upload_tab, manual_tab = st.tabs(["Carga de archivo", "Empresa individual"])
+
+    with upload_tab:
+        uploaded_file = st.file_uploader(
+            "Archivo de entrada o checkpoint",
+            type=["csv", "xlsx", "xls"],
+            disabled=worker_is_running(),
+        )
+        if uploaded_file is not None:
+            raw = uploaded_file.getvalue()
+            file_signature = hashlib.sha256(raw).hexdigest()
+            sheet_names = _sheet_names(uploaded_file.name, raw)
+            st.session_state["uploaded_sheet_names"] = sheet_names
+            selected_sheet = sheet_names[0] if len(sheet_names) == 1 else st.session_state.get("uploaded_sheet_name")
+            if len(sheet_names) > 1:
+                selected_sheet = st.selectbox(
+                    "Hoja",
+                    options=sheet_names,
+                    index=(sheet_names.index(selected_sheet) if selected_sheet in sheet_names else 0),
+                )
+            should_reload = (
+                file_signature != st.session_state.get("uploaded_file_signature")
+                or selected_sheet != st.session_state.get("uploaded_sheet_name")
+            )
+            if should_reload:
+                _load_upload(uploaded_file.name, raw, file_signature=file_signature, sheet_name=selected_sheet)
+        else:
+            st.session_state["uploaded_sheet_names"] = []
+
+    with manual_tab:
+        with st.form("manual_company_form", border=False):
+            company_name = st.text_input("Nombre de empresa", disabled=worker_is_running())
+            website = st.text_input("Web", placeholder="https://empresa.com", disabled=worker_is_running())
+            submitted = st.form_submit_button("Evaluar empresa", type="primary", disabled=worker_is_running())
+
+        st.caption("Puedes informar nombre y web, solo nombre o solo web. Si falta uno de los dos, la app inferirá un valor mínimo para ejecutar la verificación.")
+
+        if submitted:
+            try:
+                _load_manual_input(company_name, website)
+            except ValueError as exc:
+                st.warning(str(exc))
+            else:
+                st.session_state["manual_run_requested"] = True
+                st.rerun()
+
+drain_worker_events()
+
+if st.session_state.pop("manual_run_requested", False):
+    _start_run()
+    st.rerun()
 
 
 def _request_stop() -> None:
