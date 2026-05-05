@@ -209,6 +209,6 @@ def extract_completed_results(frame: pd.DataFrame) -> list[dict[str, str]]:
     completed = frame.loc[frame["processing_status"].eq(ProcessingStatus.COMPLETED.value)].copy()
     if completed.empty:
         return []
-    base_columns = ["record_hash", "nombre_empresa", "web"]
+    base_columns = [column for column in ("record_hash", "nombre_empresa", "web", "web_input") if column in completed.columns]
     result_columns = base_columns + sorted(available - set(base_columns))
     return completed[result_columns].to_dict(orient="records")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from company_verifier.models import AppSettings, CompanyVerificationResult, VerificationRunMetrics
+from company_verifier.services.csv_validation import extract_completed_results
 from company_verifier.storage.checkpoint_store import CheckpointStore
 
 
@@ -55,3 +56,36 @@ def test_checkpoint_store_builds_csv_and_json() -> None:
 
     assert "Acme Corp" in csv_payload
     assert "openai/gpt-4o-mini" in json_payload
+
+
+def test_extract_completed_results_accepts_exported_results_without_record_hash_or_web() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "nombre_empresa": "Acme Corp",
+                "web_input": "https://acme.example",
+                "web_verificada": "https://acme.example",
+                "existe": "si",
+                "operativa": "si",
+                "legitima": "si",
+                "riesgo_fraude": "bajo",
+                "tipologia_riesgo": "[]",
+                "score_confianza": "88",
+                "pasos_verificados": "[]",
+                "justificacion_detallada": "Justificación suficientemente larga para la validación del modelo.",
+                "fuentes": "[\"https://acme.example\"]",
+                "banderas_rojas": "[]",
+                "banderas_verdes": "[\"SSL válido\"]",
+                "requiere_revision_manual": False,
+                "prompt_enviado": "",
+                "respuesta_llm_cruda": "",
+                "processing_status": "completed",
+            }
+        ]
+    )
+
+    records = extract_completed_results(frame)
+
+    assert len(records) == 1
+    assert records[0]["nombre_empresa"] == "Acme Corp"
+    assert records[0]["web_input"] == "https://acme.example"
