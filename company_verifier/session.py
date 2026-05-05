@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import time
 from typing import Any
 
@@ -52,6 +53,12 @@ def init_session_state() -> None:
     st.session_state.setdefault("validation_summary", None)
     st.session_state.setdefault("checkpoint_ready", False)
     st.session_state.setdefault("uploaded_filename", None)
+    st.session_state.setdefault("uploaded_file_signature", None)
+    st.session_state.setdefault("uploaded_sheet_name", None)
+    st.session_state.setdefault("uploaded_sheet_names", [])
+    st.session_state.setdefault("batch_worker", None)
+    st.session_state.setdefault("batch_stop_event", None)
+    st.session_state.setdefault("batch_event_queue", queue.Queue())
 
 
 def get_settings() -> AppSettings:
@@ -77,10 +84,16 @@ def reset_run_state(keep_upload: bool = True) -> None:
     issues = st.session_state.get("upload_issues", []) if keep_upload else []
     source_df = st.session_state.get("source_dataframe", pd.DataFrame()) if keep_upload else pd.DataFrame()
     uploaded_filename = st.session_state.get("uploaded_filename") if keep_upload else None
+    uploaded_file_signature = st.session_state.get("uploaded_file_signature") if keep_upload else None
+    uploaded_sheet_name = st.session_state.get("uploaded_sheet_name") if keep_upload else None
+    uploaded_sheet_names = st.session_state.get("uploaded_sheet_names", []) if keep_upload else []
     st.session_state["upload_rows"] = existing_rows
     st.session_state["upload_issues"] = issues
     st.session_state["source_dataframe"] = source_df
     st.session_state["uploaded_filename"] = uploaded_filename
+    st.session_state["uploaded_file_signature"] = uploaded_file_signature
+    st.session_state["uploaded_sheet_name"] = uploaded_sheet_name
+    st.session_state["uploaded_sheet_names"] = uploaded_sheet_names
     st.session_state["results"] = []
     st.session_state["results_by_hash"] = {}
     st.session_state["logs"] = []
@@ -92,6 +105,9 @@ def reset_run_state(keep_upload: bool = True) -> None:
     st.session_state["latest_checkpoint_csv"] = ""
     st.session_state["checkpoint_ready"] = False
     st.session_state["last_processed_hash"] = None
+    st.session_state["batch_worker"] = None
+    st.session_state["batch_stop_event"] = None
+    st.session_state["batch_event_queue"] = queue.Queue()
 
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from pathlib import Path
 from collections.abc import Iterable
 
 import pandas as pd
@@ -89,17 +90,45 @@ def _read_csv_with_fallbacks(decoded: str) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(decoded), dtype=str, keep_default_na=False)
 
 
-def load_csv_bytes(raw: bytes) -> tuple[pd.DataFrame, UploadValidationResult]:
-    """Load and validate an uploaded CSV or checkpoint file."""
-    decoded, encoding = _decode_bytes(raw)
-    frame = _read_csv_with_fallbacks(decoded)
+def _excel_engine(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".xls":
+        return "xlrd"
+    return "openpyxl"
+
+
+def list_sheet_names(raw: bytes, filename: str) -> list[str]:
+    """Return workbook sheet names for Excel uploads."""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
+        return []
+    with pd.ExcelFile(io.BytesIO(raw), engine=_excel_engine(filename)) as workbook:
+        return list(workbook.sheet_names)
+
+
+def _load_frame(raw: bytes, filename: str, sheet_name: str | None = None) -> tuple[pd.DataFrame, str]:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".csv":
+        decoded, encoding = _decode_bytes(raw)
+        return _read_csv_with_fallbacks(decoded), encoding
+
+    if suffix in {".xlsx", ".xls"}:
+        with pd.ExcelFile(io.BytesIO(raw), engine=_excel_engine(filename)) as workbook:
+            selected_sheet = sheet_name or workbook.sheet_names[0]
+            frame = pd.read_excel(workbook, sheet_name=selected_sheet, dtype=str, keep_default_na=False)
+        return frame, "binary"
+
+    raise ValueError("Formato no soportado. Sube un CSV, XLSX o XLS.")
+
+
+def _validate_frame(frame: pd.DataFrame, *, encoding: str) -> tuple[pd.DataFrame, UploadValidationResult]:
     frame = _drop_empty_rows(_normalize_dataframe(frame))
     missing = REQUIRED_COLUMNS - set(frame.columns)
     if missing:
         raise ValueError(
             "Faltan columnas requeridas: "
             f"{', '.join(sorted(missing))}. "
-            "Asegúrate de subir un CSV con cabecera y separador estándar (coma, punto y coma, tab o pipe)."
+            "Asegúrate de subir un archivo con cabecera y columnas nombre_empresa y web."
         )
 
     frame["nombre_empresa"] = frame["nombre_empresa"].astype(str).str.strip()
@@ -154,6 +183,22 @@ def load_csv_bytes(raw: bytes) -> tuple[pd.DataFrame, UploadValidationResult]:
         is_checkpoint_file=RESULT_COLUMNS.issubset(set(frame.columns)),
     )
     return frame.reset_index(drop=True), validation
+
+
+def load_tabular_bytes(
+    raw: bytes,
+    filename: str,
+    *,
+    sheet_name: str | None = None,
+) -> tuple[pd.DataFrame, UploadValidationResult]:
+    """Load and validate an uploaded CSV, XLSX or XLS file."""
+    frame, encoding = _load_frame(raw, filename, sheet_name)
+    return _validate_frame(frame, encoding=encoding)
+
+
+def load_csv_bytes(raw: bytes) -> tuple[pd.DataFrame, UploadValidationResult]:
+    """Load and validate an uploaded CSV or checkpoint file."""
+    return load_tabular_bytes(raw, "upload.csv")
 
 
 def extract_completed_results(frame: pd.DataFrame) -> list[dict[str, str]]:

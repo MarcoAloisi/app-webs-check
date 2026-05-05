@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import queue
 import threading
 import time
@@ -9,21 +10,25 @@ import pandas as pd
 import streamlit as st
 
 from company_verifier.models import AppSettings, CompanyInput, CompanyVerificationResult
+from company_verifier.run_controller import current_results, drain_worker_events, get_stop_event, pending_rows, refresh_checkpoint, worker_is_running
 from company_verifier.services.cost_estimator import CostEstimatorService
-from company_verifier.services.csv_validation import extract_completed_results, load_csv_bytes
+from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names, load_tabular_bytes
 from company_verifier.services.export_service import ExportService
 from company_verifier.services.verification_orchestrator import VerificationOrchestrator
 from company_verifier.session import append_log, get_metrics, get_settings, reset_run_state, update_metrics
-from company_verifier.storage.checkpoint_store import CheckpointStore
 
 _export_service = ExportService()
-_checkpoint_store = CheckpointStore()
 _cost_service = CostEstimatorService()
 
 
 @st.cache_data(show_spinner=False)
-def _parse_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[str, str]]]:
-    frame, validation = load_csv_bytes(raw_bytes)
+def _sheet_names(file_name: str, raw_bytes: bytes) -> list[str]:
+    return list_sheet_names(raw_bytes, file_name)
+
+
+@st.cache_data(show_spinner=False)
+def _parse_upload(file_name: str, raw_bytes: bytes, sheet_name: str | None) -> tuple[pd.DataFrame, dict, list[dict[str, str]]]:
+    frame, validation = load_tabular_bytes(raw_bytes, file_name, sheet_name=sheet_name)
     completed = extract_completed_results(frame)
     return frame, validation.model_dump(mode="json"), completed
 
@@ -35,24 +40,17 @@ def _get_api_key() -> str | None:
     except Exception:  # noqa: BLE001
         return None
 
-
-
 def _current_rows() -> list[CompanyInput]:
     return [CompanyInput.model_validate(item) for item in st.session_state.get("upload_rows", [])]
 
 
-
-def _current_results() -> list[CompanyVerificationResult]:
-    return [CompanyVerificationResult.model_validate(item) for item in st.session_state.get("results", [])]
-
-
-
-def _load_upload(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -> None:
-    raw = uploaded_file.getvalue()
-    frame, validation_data, completed_records = _parse_upload(raw)
+def _load_upload(file_name: str, raw: bytes, *, file_signature: str, sheet_name: str | None) -> None:
+    frame, validation_data, completed_records = _parse_upload(file_name, raw, sheet_name)
     validation_rows = validation_data.pop("rows")
     reset_run_state(keep_upload=False)
-    st.session_state["uploaded_filename"] = uploaded_file.name
+    st.session_state["uploaded_filename"] = file_name
+    st.session_state["uploaded_file_signature"] = file_signature
+    st.session_state["uploaded_sheet_name"] = sheet_name
     st.session_state["source_dataframe"] = frame
     st.session_state["upload_rows"] = validation_rows
     st.session_state["validation_summary"] = validation_data
@@ -74,45 +72,7 @@ def _load_upload(uploaded_file: st.runtime.uploaded_file_manager.UploadedFile) -
     if restored_count:
         append_log(f"Checkpoint cargado con {restored_count} resultados previos.")
     else:
-        append_log(f"Archivo cargado: {uploaded_file.name}")
-
-
-
-def _pending_rows() -> list[CompanyInput]:
-    done_hashes = set(st.session_state.get("results_by_hash", {}).keys())
-    return [row for row in _current_rows() if row.record_hash not in done_hashes]
-
-
-
-def _refresh_checkpoint() -> None:
-    results = _current_results()
-    metrics = get_metrics()
-    settings = get_settings()
-    source_frame = st.session_state.get("source_dataframe", pd.DataFrame())
-    st.session_state["latest_checkpoint_json"] = _checkpoint_store.build_payload(source_frame, results, settings, metrics)
-    st.session_state["latest_checkpoint_csv"] = _checkpoint_store.build_checkpoint_csv(source_frame, results)
-    st.session_state["checkpoint_ready"] = True
-    append_log("Checkpoint actualizado en memoria y listo para descarga.")
-
-
-def _get_event_queue() -> queue.Queue[dict[str, Any]]:
-    event_queue = st.session_state.get("batch_event_queue")
-    if event_queue is None:
-        event_queue = queue.Queue()
-        st.session_state["batch_event_queue"] = event_queue
-    return event_queue
-
-
-def _get_stop_event() -> threading.Event | None:
-    stop_event = st.session_state.get("batch_stop_event")
-    if isinstance(stop_event, threading.Event):
-        return stop_event
-    return None
-
-
-def _worker_is_running() -> bool:
-    worker = st.session_state.get("batch_worker")
-    return isinstance(worker, threading.Thread) and worker.is_alive()
+        append_log(f"Archivo cargado: {file_name}")
 
 
 def _enqueue_event(event_queue: queue.Queue[dict[str, Any]], event_type: str, **payload: Any) -> None:
@@ -179,75 +139,6 @@ def _process_rows_in_background(
     _enqueue_event(event_queue, "completed")
 
 
-def _apply_company_result(event: dict[str, Any]) -> None:
-    row_hash = str(event["row_hash"])
-    results_by_hash = dict(st.session_state.get("results_by_hash", {}))
-    if row_hash in results_by_hash:
-        return
-
-    serialized = dict(event["result"])
-    result_list = list(st.session_state.get("results", []))
-    results_by_hash[row_hash] = serialized
-    result_list.append(serialized)
-    st.session_state["last_processed_hash"] = row_hash
-    st.session_state["results_by_hash"] = results_by_hash
-    st.session_state["results"] = result_list
-
-    metrics = get_metrics()
-    settings = get_settings()
-    processed_rows = metrics.processed_rows + 1
-    update_metrics(
-        processed_rows=processed_rows,
-        completed_rows=len(result_list),
-        batches_completed=processed_rows // settings.batch_size,
-        estimated_cost_usd=round(metrics.estimated_cost_usd + float(event["estimated_cost_usd"]), 4),
-    )
-    append_log(f"Empresa completada: {event['company_name']}")
-
-    if processed_rows % settings.checkpoint_interval == 0 or len(_pending_rows()) == 0:
-        _refresh_checkpoint()
-
-
-def _finalize_run(status: str, message: str) -> None:
-    if st.session_state.get("run_status") != status:
-        st.session_state["run_status"] = status
-    update_metrics(finished_at=time.time())
-    _refresh_checkpoint()
-    append_log(message)
-
-
-def _drain_worker_events() -> None:
-    event_queue = _get_event_queue()
-    while True:
-        try:
-            event = event_queue.get_nowait()
-        except queue.Empty:
-            break
-
-        event_type = event["type"]
-        if event_type == "log":
-            append_log(str(event["message"]))
-        elif event_type == "company_done":
-            _apply_company_result(event)
-        elif event_type == "completed":
-            _finalize_run("completed", "Ejecución finalizada.")
-        elif event_type == "stopped":
-            _finalize_run("stopped", "Ejecución detenida por el usuario.")
-        elif event_type == "failed":
-            _finalize_run(
-                "failed",
-                f"Error durante el batch ({event['company_name']}): {event['error']}",
-            )
-
-    worker = st.session_state.get("batch_worker")
-    if isinstance(worker, threading.Thread) and not worker.is_alive():
-        if st.session_state.get("run_status") == "running":
-            _finalize_run("failed", "La ejecución terminó de forma inesperada.")
-        if st.session_state.get("run_status") != "running":
-            st.session_state["batch_worker"] = None
-            st.session_state["batch_stop_event"] = None
-
-
 
 def _eta_text() -> str:
     metrics = get_metrics()
@@ -265,21 +156,39 @@ def _eta_text() -> str:
 st.subheader("Carga del CSV y control de ejecución")
 with st.container(border=True):
     uploaded_file = st.file_uploader(
-        "CSV de entrada o checkpoint CSV",
-        type=["csv"],
-        disabled=_worker_is_running(),
+        "Archivo de entrada o checkpoint",
+        type=["csv", "xlsx", "xls"],
+        disabled=worker_is_running(),
     )
-    if uploaded_file is not None and uploaded_file.name != st.session_state.get("uploaded_filename"):
-        _load_upload(uploaded_file)
+    if uploaded_file is not None:
+        raw = uploaded_file.getvalue()
+        file_signature = hashlib.sha256(raw).hexdigest()
+        sheet_names = _sheet_names(uploaded_file.name, raw)
+        st.session_state["uploaded_sheet_names"] = sheet_names
+        selected_sheet = sheet_names[0] if len(sheet_names) == 1 else st.session_state.get("uploaded_sheet_name")
+        if len(sheet_names) > 1:
+            selected_sheet = st.selectbox(
+                "Hoja",
+                options=sheet_names,
+                index=(sheet_names.index(selected_sheet) if selected_sheet in sheet_names else 0),
+            )
+        should_reload = (
+            file_signature != st.session_state.get("uploaded_file_signature")
+            or selected_sheet != st.session_state.get("uploaded_sheet_name")
+        )
+        if should_reload:
+            _load_upload(uploaded_file.name, raw, file_signature=file_signature, sheet_name=selected_sheet)
+    else:
+        st.session_state["uploaded_sheet_names"] = []
 
-_drain_worker_events()
+drain_worker_events()
 
 
 def _start_run() -> None:
-    if _worker_is_running():
+    if worker_is_running():
         return
 
-    pending = _pending_rows()
+    pending = pending_rows()
     if not pending:
         st.warning("No quedan empresas pendientes.")
         return
@@ -317,11 +226,11 @@ def _start_run() -> None:
 
 
 def _request_stop() -> None:
-    if not _worker_is_running():
+    if not worker_is_running():
         return
 
     st.session_state["stop_requested"] = True
-    stop_event = _get_stop_event()
+    stop_event = get_stop_event()
     if stop_event is not None:
         stop_event.set()
     append_log("Se detendrá al terminar la empresa actual.")
@@ -329,18 +238,18 @@ def _request_stop() -> None:
 
 @st.fragment(run_every="1s")
 def _render_live_panel() -> None:
-    _drain_worker_events()
+    drain_worker_events()
 
     rows = _current_rows()
-    results = _current_results()
+    results = current_results()
     metrics = get_metrics()
     settings = get_settings()
-    pending_rows = _pending_rows() if rows else []
+    pending = pending_rows() if rows else []
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Filas válidas", len(rows))
     col2.metric("Resultados generados", len(results))
-    col3.metric("Pendientes", len(pending_rows))
+    col3.metric("Pendientes", len(pending))
     col4.metric("ETA", _eta_text())
 
     progress_total = metrics.total_rows or len(rows) or 1
@@ -356,15 +265,12 @@ def _render_live_panel() -> None:
         )
 
     control_cols = st.columns([1, 1, 1, 2])
-    if control_cols[0].button("Iniciar / reanudar", type="primary", disabled=not pending_rows or _worker_is_running()):
+    if control_cols[0].button("Iniciar / reanudar", type="primary", disabled=not pending or worker_is_running()):
         _start_run()
-    if control_cols[1].button("Detener", disabled=not _worker_is_running()):
+    if control_cols[1].button("Detener", disabled=not worker_is_running()):
         _request_stop()
-    if control_cols[2].button("Reset sesión", disabled=_worker_is_running() or (not rows and not results)):
+    if control_cols[2].button("Reset sesión", disabled=worker_is_running() or (not rows and not results)):
         reset_run_state(keep_upload=False)
-        st.session_state["batch_worker"] = None
-        st.session_state["batch_stop_event"] = None
-        st.session_state["batch_event_queue"] = queue.Queue()
         st.rerun()
     control_cols[3].write(f"Estado actual: **{st.session_state.get('run_status', 'idle')}**")
 
@@ -404,8 +310,8 @@ def _render_live_panel() -> None:
         st.code("\n".join(logs[-40:]) or "Sin eventos todavía.", language="text")
 
     if not rows:
-        st.info("Sube un CSV con columnas nombre_empresa y web para empezar.")
-    elif _worker_is_running():
+        st.info("Sube un CSV o Excel con columnas nombre_empresa y web para empezar.")
+    elif worker_is_running():
         st.info("La ejecución corre en segundo plano. Esta vista se actualiza automáticamente para mostrar progreso, logs y checkpoints en tiempo real.")
 
 _render_live_panel()
