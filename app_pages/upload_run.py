@@ -14,7 +14,6 @@ from company_verifier.run_controller import current_results, drain_worker_events
 from company_verifier.services.cost_estimator import CostEstimatorService
 from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names, load_tabular_bytes
 from company_verifier.services.export_service import ExportService
-from company_verifier.services.verification_orchestrator import VerificationOrchestrator
 from company_verifier.session import append_log, get_metrics, get_settings, reset_run_state, update_metrics
 
 _export_service = ExportService()
@@ -87,6 +86,8 @@ def _process_rows_in_background(
     event_queue: queue.Queue[dict[str, Any]],
     stop_event: threading.Event,
 ) -> None:
+    from company_verifier.services.verification_orchestrator import VerificationOrchestrator
+
     settings = AppSettings.model_validate(settings_data)
     rows = [CompanyInput.model_validate(item) for item in rows_data]
     orchestrator = VerificationOrchestrator(api_key)
@@ -149,6 +150,17 @@ def _eta_text() -> str:
     remaining = max(0, metrics.total_rows - metrics.processed_rows)
     eta_seconds = int(remaining / rate) if rate else 0
     minutes, seconds = divmod(eta_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _elapsed_text() -> str:
+    metrics = get_metrics()
+    if not metrics.started_at:
+        return "00:00:00"
+    end_time = metrics.finished_at or time.time()
+    elapsed_seconds = max(0, int(end_time - metrics.started_at))
+    minutes, seconds = divmod(elapsed_seconds, 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
@@ -246,11 +258,12 @@ def _render_live_panel() -> None:
     settings = get_settings()
     pending = pending_rows() if rows else []
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Filas válidas", len(rows))
     col2.metric("Resultados generados", len(results))
     col3.metric("Pendientes", len(pending))
     col4.metric("ETA", _eta_text())
+    col5.metric("Transcurrido", _elapsed_text())
 
     progress_total = metrics.total_rows or len(rows) or 1
     st.progress(
