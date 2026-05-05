@@ -111,6 +111,7 @@ class VerificationRunMetrics(BaseModel):
     failed_rows: int = 0
     batches_completed: int = 0
     estimated_cost_usd: float = 0.0
+    accumulated_row_seconds: float = 0.0
 
 
 class AppSettings(BaseModel):
@@ -119,6 +120,7 @@ class AppSettings(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=1.0)
     max_tokens: int = Field(default=1800, ge=500, le=4000)
     batch_size: int = Field(default=30, ge=30, le=50)
+    parallel_workers: int = Field(default=10, ge=1, le=20)
     manual_review_threshold: int = Field(default=70, ge=1, le=100)
     enable_web_search: bool = False
     web_search_engine: str = "auto"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import hashlib
 import queue
 import threading
@@ -78,6 +79,52 @@ def _enqueue_event(event_queue: queue.Queue[dict[str, Any]], event_type: str, **
     event_queue.put({"type": event_type, **payload})
 
 
+def _process_single_row(
+    row_data: dict[str, Any],
+    settings_data: dict[str, Any],
+    api_key: str | None,
+    start_position: int,
+    total_rows: int,
+    relative_index: int,
+    event_queue: queue.Queue[dict[str, Any]],
+) -> dict[str, Any]:
+    from company_verifier.services.verification_orchestrator import VerificationOrchestrator
+
+    settings = AppSettings.model_validate(settings_data)
+    current_row = CompanyInput.model_validate(row_data)
+    orchestrator = VerificationOrchestrator(api_key)
+    estimator = CostEstimatorService()
+
+    current_position = start_position + relative_index
+    batch_number = ((current_position - 1) // settings.batch_size) + 1
+    batch_offset = ((current_position - 1) % settings.batch_size) + 1
+    _enqueue_event(
+        event_queue,
+        "log",
+        message=(
+            f"Procesando empresa {current_position}/{total_rows} · "
+            f"batch {batch_number} · elemento {batch_offset}/{settings.batch_size}: "
+            f"{current_row.nombre_empresa}"
+        ),
+    )
+
+    started_at = time.perf_counter()
+    cost_estimate = estimator.estimate([current_row], settings)
+    result = orchestrator.process_company(
+        current_row,
+        settings=settings,
+        log_callback=lambda message: _enqueue_event(event_queue, "log", message=message),
+    )
+    duration_seconds = time.perf_counter() - started_at
+    return {
+        "row_hash": current_row.record_hash,
+        "company_name": current_row.nombre_empresa,
+        "result": result.model_dump(mode="json"),
+        "estimated_cost_usd": cost_estimate.estimated_cost_usd,
+        "duration_seconds": duration_seconds,
+    }
+
+
 def _process_rows_in_background(
     rows_data: list[dict[str, Any]],
     settings_data: dict[str, Any],
@@ -86,56 +133,73 @@ def _process_rows_in_background(
     event_queue: queue.Queue[dict[str, Any]],
     stop_event: threading.Event,
 ) -> None:
-    from company_verifier.services.verification_orchestrator import VerificationOrchestrator
-
     settings = AppSettings.model_validate(settings_data)
-    rows = [CompanyInput.model_validate(item) for item in rows_data]
-    orchestrator = VerificationOrchestrator(api_key)
-    estimator = CostEstimatorService()
-    total_rows = start_position + len(rows)
+    total_rows = start_position + len(rows_data)
+    max_workers = min(settings.parallel_workers, len(rows_data))
+    row_iterator = iter(enumerate(rows_data, start=1))
+    futures: dict[Future[dict[str, Any]], tuple[int, dict[str, Any]]] = {}
 
-    for index, current_row in enumerate(rows, start=1):
+    def _submit_next(executor: ThreadPoolExecutor) -> bool:
         if stop_event.is_set():
-            _enqueue_event(event_queue, "stopped")
-            return
-
-        current_position = start_position + index
-        batch_number = ((current_position - 1) // settings.batch_size) + 1
-        batch_offset = ((current_position - 1) % settings.batch_size) + 1
-        _enqueue_event(
-            event_queue,
-            "log",
-            message=(
-                f"Procesando empresa {current_position}/{total_rows} · "
-                f"batch {batch_number} · elemento {batch_offset}/{settings.batch_size}: "
-                f"{current_row.nombre_empresa}"
-            ),
-        )
-        cost_estimate = estimator.estimate([current_row], settings)
-
+            return False
         try:
-            result = orchestrator.process_company(
-                current_row,
-                settings=settings,
-                log_callback=lambda message: _enqueue_event(event_queue, "log", message=message),
-            )
-        except Exception as exc:  # noqa: BLE001
-            _enqueue_event(
-                event_queue,
-                "failed",
-                company_name=current_row.nombre_empresa,
-                error=str(exc),
-            )
-            return
-
-        _enqueue_event(
+            relative_index, row_data = next(row_iterator)
+        except StopIteration:
+            return False
+        future = executor.submit(
+            _process_single_row,
+            row_data,
+            settings_data,
+            api_key,
+            start_position,
+            total_rows,
+            relative_index,
             event_queue,
-            "company_done",
-            row_hash=current_row.record_hash,
-            company_name=current_row.nombre_empresa,
-            result=result.model_dump(mode="json"),
-            estimated_cost_usd=cost_estimate.estimated_cost_usd,
         )
+        futures[future] = (relative_index, row_data)
+        return True
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="verification-row") as executor:
+        for _ in range(max_workers):
+            if not _submit_next(executor):
+                break
+
+        while futures:
+            done, _ = wait(futures.keys(), timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                if stop_event.is_set():
+                    for future in futures:
+                        future.cancel()
+                continue
+
+            for future in done:
+                _, row_data = futures.pop(future)
+                try:
+                    payload = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    stop_event.set()
+                    for pending_future in futures:
+                        pending_future.cancel()
+                    current_row = CompanyInput.model_validate(row_data)
+                    _enqueue_event(
+                        event_queue,
+                        "failed",
+                        company_name=current_row.nombre_empresa,
+                        error=str(exc),
+                    )
+                    return
+
+                _enqueue_event(event_queue, "company_done", **payload)
+
+                if stop_event.is_set():
+                    continue
+
+                while len(futures) < max_workers and _submit_next(executor):
+                    pass
+
+    if stop_event.is_set():
+        _enqueue_event(event_queue, "stopped")
+        return
 
     _enqueue_event(event_queue, "completed")
 
@@ -143,12 +207,18 @@ def _process_rows_in_background(
 
 def _eta_text() -> str:
     metrics = get_metrics()
+    settings = get_settings()
     if not metrics.started_at or metrics.processed_rows == 0 or metrics.total_rows == 0:
         return "n/d"
-    elapsed = max(1.0, time.time() - metrics.started_at)
-    rate = metrics.processed_rows / elapsed
     remaining = max(0, metrics.total_rows - metrics.processed_rows)
-    eta_seconds = int(remaining / rate) if rate else 0
+    if remaining == 0:
+        return "00:00:00"
+    accumulated_seconds = metrics.accumulated_row_seconds
+    if accumulated_seconds <= 0:
+        accumulated_seconds = max(1.0, time.time() - metrics.started_at)
+    avg_row_seconds = accumulated_seconds / metrics.processed_rows
+    effective_parallelism = max(1, min(settings.parallel_workers, remaining, metrics.total_rows))
+    eta_seconds = int((remaining * avg_row_seconds) / effective_parallelism)
     minutes, seconds = divmod(eta_seconds, 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
@@ -163,6 +233,21 @@ def _elapsed_text() -> str:
     minutes, seconds = divmod(elapsed_seconds, 60)
     hours, minutes = divmod(minutes, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _duration_text(total_seconds: float) -> str:
+    rounded_seconds = max(0, int(total_seconds))
+    minutes, seconds = divmod(rounded_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _avg_row_time_text() -> str:
+    metrics = get_metrics()
+    if metrics.processed_rows == 0:
+        return "00:00:00"
+    average_seconds = metrics.accumulated_row_seconds / metrics.processed_rows
+    return _duration_text(average_seconds)
 
 
 st.subheader("Carga del CSV y control de ejecución")
@@ -245,7 +330,7 @@ def _request_stop() -> None:
     stop_event = get_stop_event()
     if stop_event is not None:
         stop_event.set()
-    append_log("Se detendrá al terminar la empresa actual.")
+    append_log("Se detendrá cuando terminen las empresas ya en curso.")
 
 
 @st.fragment(run_every="1s")
@@ -258,12 +343,13 @@ def _render_live_panel() -> None:
     settings = get_settings()
     pending = pending_rows() if rows else []
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Filas válidas", len(rows))
     col2.metric("Resultados generados", len(results))
     col3.metric("Pendientes", len(pending))
     col4.metric("ETA", _eta_text())
     col5.metric("Transcurrido", _elapsed_text())
+    col6.metric("Promedio/empresa", _avg_row_time_text())
 
     progress_total = metrics.total_rows or len(rows) or 1
     st.progress(
@@ -274,7 +360,7 @@ def _render_live_panel() -> None:
     if rows:
         estimate = _cost_service.estimate(rows[: settings.batch_size], settings)
         st.caption(
-            f"Estimación rápida por batch: ~{estimate.estimated_total_tokens} tokens y ${estimate.estimated_cost_usd:.4f} con {settings.model}."
+            f"Estimación rápida por batch: ~{estimate.estimated_total_tokens} tokens y ${estimate.estimated_cost_usd:.4f} con {settings.model}. Paralelismo actual: {settings.parallel_workers}."
         )
 
     control_cols = st.columns([1, 1, 1, 2])

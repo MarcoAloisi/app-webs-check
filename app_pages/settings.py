@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from company_verifier.config import DEFAULT_MODEL_OPTIONS, get_model_capability
+from company_verifier.config import DEFAULT_MODEL_OPTIONS, MAX_PARALLEL_WORKERS, MIN_PARALLEL_WORKERS, get_model_capability
 from company_verifier.models import AppSettings
 from company_verifier.session import get_settings, update_settings
 
@@ -28,6 +28,14 @@ with st.form("settings_form"):
     temperature = st.slider("Temperatura", min_value=0.0, max_value=1.0, value=float(settings.temperature), step=0.05)
     max_tokens = st.slider("Máx. tokens", min_value=500, max_value=4000, value=int(settings.max_tokens), step=100)
     batch_size = st.slider("Tamaño de batch", min_value=30, max_value=50, value=int(settings.batch_size), step=1)
+    parallel_workers = st.slider(
+        "Filas en paralelo",
+        min_value=MIN_PARALLEL_WORKERS,
+        max_value=MAX_PARALLEL_WORKERS,
+        value=int(settings.parallel_workers),
+        step=1,
+        help="Cantidad máxima de empresas procesándose al mismo tiempo.",
+    )
     manual_threshold = st.slider("Umbral revisión manual", min_value=1, max_value=100, value=int(settings.manual_review_threshold), step=1)
     checkpoint_interval = st.number_input("Intervalo de checkpoint", min_value=100, max_value=2000, value=int(settings.checkpoint_interval), step=100)
     resolved_model = custom_model.strip() if model_choice == "Otro (ID manual)" else model_choice
@@ -60,6 +68,7 @@ if submitted:
         temperature=temperature,
         max_tokens=max_tokens,
         batch_size=batch_size,
+        parallel_workers=parallel_workers,
         manual_review_threshold=manual_threshold,
         enable_web_search=enable_web_search if default_web_search else False,
         web_search_engine=web_engine,

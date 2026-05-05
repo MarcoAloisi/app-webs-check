@@ -68,9 +68,9 @@ def _apply_company_result(event: dict[str, Any]) -> None:
         return
 
     serialized = dict(event["result"])
-    result_list = list(st.session_state.get("results", []))
     results_by_hash[row_hash] = serialized
-    result_list.append(serialized)
+    ordered_hashes = [item.get("record_hash") for item in st.session_state.get("upload_rows", [])]
+    result_list = [results_by_hash[item_hash] for item_hash in ordered_hashes if item_hash in results_by_hash]
     st.session_state["last_processed_hash"] = row_hash
     st.session_state["results_by_hash"] = results_by_hash
     st.session_state["results"] = result_list
@@ -83,6 +83,7 @@ def _apply_company_result(event: dict[str, Any]) -> None:
         completed_rows=len(result_list),
         batches_completed=processed_rows // settings.batch_size,
         estimated_cost_usd=round(metrics.estimated_cost_usd + float(event["estimated_cost_usd"]), 4),
+        accumulated_row_seconds=round(metrics.accumulated_row_seconds + float(event.get("duration_seconds", 0.0)), 4),
     )
     append_log(f"Empresa completada: {event['company_name']}")
 
