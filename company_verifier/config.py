@@ -45,13 +45,13 @@ class CapabilityProfile:
 
 MODEL_CAPABILITIES: dict[str, CapabilityProfile] = {
     "x-ai/grok-4.1-fast": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
-    "openai/gpt-4o-mini": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
-    "openai/gpt-oss-120b": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
-    "openai/gpt-oss-120b:free": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
-    "minimax/minimax-m2.5:free": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
-    "anthropic/claude-3.5-haiku": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
+    "openai/gpt-4o-mini": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
+    "openai/gpt-oss-120b": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
+    "openai/gpt-oss-120b:free": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
+    "minimax/minimax-m2.5:free": CapabilityProfile(supports_web_search=True, supports_json_mode=False),
+    "anthropic/claude-3.5-haiku": CapabilityProfile(supports_web_search=True, supports_json_mode=False),
     "google/gemini-2.0-flash-001": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
-    "meta-llama/llama-3.3-70b-instruct": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
+    "meta-llama/llama-3.3-70b-instruct": CapabilityProfile(supports_web_search=True, supports_json_mode=False),
     "x-ai/grok-3-mini": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
 }
 
@@ -64,7 +64,7 @@ def get_model_capability(model: str) -> CapabilityProfile:
     if lowered.startswith("x-ai/grok"):
         return CapabilityProfile(supports_web_search=True, supports_json_mode=True)
     if lowered.startswith("openai/"):
-        return CapabilityProfile(supports_web_search=False, supports_json_mode=True)
+        return CapabilityProfile(supports_web_search=True, supports_json_mode=True)
     if lowered.startswith("google/") or lowered.startswith("gemini"):
         return CapabilityProfile(supports_web_search=True, supports_json_mode=True)
-    return CapabilityProfile(supports_web_search=False, supports_json_mode=False)
+    return CapabilityProfile(supports_web_search=True, supports_json_mode=False)
