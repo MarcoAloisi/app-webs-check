@@ -11,6 +11,7 @@ from company_verifier.models import CompanyVerificationResult
 from company_verifier.run_controller import drain_worker_events, worker_is_running
 from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names
 from company_verifier.services.export_service import ExportService
+from company_verifier.session import get_results_view_source, set_results_view_source
 
 _export_service = ExportService()
 
@@ -57,13 +58,18 @@ def _serialized_results() -> tuple[str, ...]:
 
 
 def _resolve_results_source() -> tuple[tuple[str, ...], str | None]:
+    stored_source, stored_serialized_results, stored_message = get_results_view_source()
     source = st.radio(
         "Origen de resultados",
         options=["Sesión actual", "Archivo externo"],
+        index=0 if stored_source == "session" else 1,
         horizontal=True,
     )
     if source == "Sesión actual":
-        return _serialized_results(), "Mostrando resultados de la sesión actual."
+        serialized_results = _serialized_results()
+        message = "Mostrando resultados de la sesión actual."
+        set_results_view_source("session", serialized_results=serialized_results, message=message)
+        return serialized_results, message
 
     uploaded_file = st.file_uploader(
         "Subir resultados exportados o checkpoint",
@@ -71,6 +77,8 @@ def _resolve_results_source() -> tuple[tuple[str, ...], str | None]:
         key="results_upload_file",
     )
     if uploaded_file is None:
+        if stored_source == "external" and stored_serialized_results:
+            return stored_serialized_results, stored_message
         st.info("Sube un archivo de resultados para visualizarlo aquí sin reemplazar la sesión actual.")
         return (), None
 
@@ -89,7 +97,9 @@ def _resolve_results_source() -> tuple[tuple[str, ...], str | None]:
     if not serialized_results:
         st.warning("El archivo no contiene resultados procesados para mostrar.")
         return (), None
-    return serialized_results, f"Mostrando resultados cargados desde {uploaded_file.name}."
+    message = f"Mostrando resultados cargados desde {uploaded_file.name}."
+    set_results_view_source("external", serialized_results=serialized_results, message=message)
+    return serialized_results, message
 
 
 def _render_results_page() -> None:
@@ -144,12 +154,12 @@ def _render_results_page() -> None:
         "score_confianza",
         "requiere_revision_manual",
     ]
-    st.dataframe(filtered[visible_columns], use_container_width=True, hide_index=True)
+    st.dataframe(filtered[visible_columns], width="stretch", hide_index=True)
 
     csv_bytes, excel_bytes = _build_exports(serialized_results)
     export_cols = st.columns(2)
-    export_cols[0].download_button("Exportar CSV completo", data=csv_bytes, file_name="resultados_completos.csv", mime="text/csv", use_container_width=True)
-    export_cols[1].download_button("Exportar Excel completo", data=excel_bytes, file_name="resultados_completos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    export_cols[0].download_button("Exportar CSV completo", data=csv_bytes, file_name="resultados_completos.csv", mime="text/csv", width="stretch")
+    export_cols[1].download_button("Exportar Excel completo", data=excel_bytes, file_name="resultados_completos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
 
     st.markdown("### Detalle expandible")
     for record in filtered.head(50).to_dict(orient="records"):

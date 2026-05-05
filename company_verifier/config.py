@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 APP_TITLE = "Verificador masivo de empresas"
-DEFAULT_MODEL = "x-ai/grok-4.1-fast"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 DEFAULT_FALLBACK_MODEL = "anthropic/claude-3.5-haiku"
-DEFAULT_ENABLE_WEB_SEARCH = True
+DEFAULT_ENABLE_WEB_SEARCH = False
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_MAX_TOKENS = 1800
 DEFAULT_BATCH_SIZE = 30
@@ -23,6 +23,9 @@ DEFAULT_RETRY_ATTEMPTS = 4
 USER_AGENT = "app-webs-check/0.1 (+Streamlit Community Cloud)"
 
 DEFAULT_MODEL_OPTIONS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-120b:free",
+    "minimax/minimax-m2.5:free",
     "x-ai/grok-4.1-fast",
     "openai/gpt-4o-mini",
     "anthropic/claude-3.5-haiku",
@@ -43,6 +46,9 @@ class CapabilityProfile:
 MODEL_CAPABILITIES: dict[str, CapabilityProfile] = {
     "x-ai/grok-4.1-fast": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
     "openai/gpt-4o-mini": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
+    "openai/gpt-oss-120b": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
+    "openai/gpt-oss-120b:free": CapabilityProfile(supports_web_search=False, supports_json_mode=True),
+    "minimax/minimax-m2.5:free": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
     "anthropic/claude-3.5-haiku": CapabilityProfile(supports_web_search=False, supports_json_mode=False),
     "google/gemini-2.0-flash-001": CapabilityProfile(supports_web_search=True, supports_json_mode=True),
     "meta-llama/llama-3.3-70b-instruct": CapabilityProfile(supports_web_search=False, supports_json_mode=False),

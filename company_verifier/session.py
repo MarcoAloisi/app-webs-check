@@ -61,6 +61,9 @@ def init_session_state() -> None:
     st.session_state.setdefault("batch_worker", None)
     st.session_state.setdefault("batch_stop_event", None)
     st.session_state.setdefault("batch_event_queue", queue.Queue())
+    st.session_state.setdefault("results_view_source", "session")
+    st.session_state.setdefault("results_view_serialized", ())
+    st.session_state.setdefault("results_view_message", None)
 
 
 def get_settings() -> AppSettings:
@@ -123,3 +126,22 @@ def update_metrics(**changes: Any) -> None:
 
 def get_metrics() -> VerificationRunMetrics:
     return VerificationRunMetrics.model_validate(st.session_state["run_metrics"])
+
+
+def set_results_view_source(
+    source: str,
+    *,
+    serialized_results: tuple[str, ...] = (),
+    message: str | None = None,
+) -> None:
+    st.session_state["results_view_source"] = source
+    st.session_state["results_view_serialized"] = serialized_results
+    st.session_state["results_view_message"] = message
+
+
+def get_results_view_source() -> tuple[str, tuple[str, ...], str | None]:
+    return (
+        str(st.session_state.get("results_view_source", "session")),
+        tuple(st.session_state.get("results_view_serialized", ())),
+        st.session_state.get("results_view_message"),
+    )

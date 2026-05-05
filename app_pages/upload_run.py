@@ -465,7 +465,7 @@ def _render_live_panel() -> None:
     issues = validation.get("issues", [])
     if issues:
         st.warning("Se detectaron incidencias en la carga.")
-        st.dataframe(pd.DataFrame(issues), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(issues), width="stretch", hide_index=True)
 
     if st.session_state.get("checkpoint_ready"):
         st.success("Hay un checkpoint actualizado listo para descarga.")
@@ -475,21 +475,21 @@ def _render_live_panel() -> None:
             data=st.session_state.get("latest_checkpoint_csv", ""),
             file_name="checkpoint_resultados.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
         download_cols[1].download_button(
             "Descargar checkpoint JSON",
             data=st.session_state.get("latest_checkpoint_json", ""),
             file_name="checkpoint_resultados.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
         download_cols[2].download_button(
             "Descargar resultados JSONL",
             data=_export_service.jsonl_bytes(results),
             file_name="resultados.jsonl",
             mime="application/jsonl",
-            use_container_width=True,
+            width="stretch",
         )
 
     with st.expander("Log en vivo", expanded=True):

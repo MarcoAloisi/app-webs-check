@@ -4,6 +4,7 @@ import streamlit as st
 
 from company_verifier.models import CompanyVerificationResult, LegitimacyAnswer, RiskLevel
 from company_verifier.run_controller import current_results, drain_worker_events, worker_is_running
+from company_verifier.session import get_results_view_source
 
 
 def _is_suspicious(result: CompanyVerificationResult) -> bool:
@@ -16,7 +17,13 @@ def _is_suspicious(result: CompanyVerificationResult) -> bool:
 
 def _render_audit_page() -> None:
     st.subheader("Auditoría por empresa")
-    results = current_results()
+    source, serialized_results, source_message = get_results_view_source()
+    if source == "external" and serialized_results:
+        results = [CompanyVerificationResult.model_validate_json(item) for item in serialized_results]
+        if source_message:
+            st.caption(source_message)
+    else:
+        results = current_results()
     if not results:
         st.info("Todavía no hay resultados auditables.")
         return
