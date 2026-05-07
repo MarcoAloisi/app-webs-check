@@ -17,6 +17,8 @@ RESULT_COLUMNS = {
     "web_verificada",
     "existe",
     "operativa",
+    "absorbida_adquirida",
+    "rebranded",
     "legitima",
     "riesgo_fraude",
     "tipologia_riesgo",
@@ -29,6 +31,17 @@ RESULT_COLUMNS = {
     "requiere_revision_manual",
     "prompt_enviado",
     "respuesta_llm_cruda",
+    "processing_status",
+}
+CHECKPOINT_MARKER_COLUMNS = {
+    "web_verificada",
+    "existe",
+    "operativa",
+    "legitima",
+    "riesgo_fraude",
+    "score_confianza",
+    "pasos_verificados",
+    "justificacion_detallada",
     "processing_status",
 }
 
@@ -180,7 +193,7 @@ def _validate_frame(frame: pd.DataFrame, *, encoding: str) -> tuple[pd.DataFrame
         issues=issues,
         duplicates_removed=duplicates_removed,
         encoding_used=encoding,
-        is_checkpoint_file=RESULT_COLUMNS.issubset(set(frame.columns)),
+        is_checkpoint_file=CHECKPOINT_MARKER_COLUMNS.issubset(set(frame.columns)),
     )
     return frame.reset_index(drop=True), validation
 

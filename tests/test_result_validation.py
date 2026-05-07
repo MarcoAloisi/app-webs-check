@@ -40,6 +40,8 @@ def test_fallback_creates_seven_steps_and_manual_review() -> None:
     assert result.requiere_revision_manual is True
     assert result.score_confianza > 0
     assert result.web_verificada == "https://acme.example"
+    assert result.absorbida_adquirida == "no"
+    assert result.rebranded == "no"
 
 
 def test_llm_result_score_is_capped_for_liquidated_inactive_mismatched_company() -> None:
@@ -62,6 +64,8 @@ def test_llm_result_score_is_capped_for_liquidated_inactive_mismatched_company()
             "web_verificada": None,
             "existe": "si",
             "operativa": "no",
+            "absorbida_adquirida": "si",
+            "rebranded": "no",
             "legitima": "si",
             "riesgo_fraude": "medio",
             "tipologia_riesgo": ["continuidad_ambigua"],
@@ -99,4 +103,6 @@ def test_llm_result_score_is_capped_for_liquidated_inactive_mismatched_company()
 
     assert result.score_confianza <= 35
     assert result.legitima == "sospechosa"
+    assert result.absorbida_adquirida == "si"
+    assert result.rebranded == "no"
     assert result.requiere_revision_manual is True

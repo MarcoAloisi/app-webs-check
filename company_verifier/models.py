@@ -32,6 +32,11 @@ class RiskLevel(str, Enum):
     HIGH = "alto"
 
 
+class BinaryAnswer(str, Enum):
+    YES = "si"
+    NO = "no"
+
+
 class ProcessingStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
@@ -70,6 +75,8 @@ class CompanyVerificationResult(BaseModel):
     web_verificada: str | None = None
     existe: TernaryAnswer = TernaryAnswer.UNDETERMINED
     operativa: TernaryAnswer = TernaryAnswer.UNDETERMINED
+    absorbida_adquirida: BinaryAnswer = BinaryAnswer.NO
+    rebranded: BinaryAnswer = BinaryAnswer.NO
     legitima: LegitimacyAnswer = LegitimacyAnswer.SUSPICIOUS
     riesgo_fraude: RiskLevel = RiskLevel.MEDIUM
     tipologia_riesgo: list[str] = Field(default_factory=list)
@@ -166,6 +173,7 @@ class CheckpointPayload(BaseModel):
 
 __all__ = [
     "AppSettings",
+    "BinaryAnswer",
     "CheckpointPayload",
     "CompanyInput",
     "CompanyVerificationResult",

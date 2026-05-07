@@ -149,6 +149,8 @@ def _render_results_page() -> None:
         "web_verificada",
         "existe",
         "operativa",
+        "absorbida_adquirida",
+        "rebranded",
         "legitima",
         "riesgo_fraude",
         "score_confianza",

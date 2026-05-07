@@ -71,11 +71,13 @@ def _render_audit_page() -> None:
     selected_label = st.selectbox("Empresa", options=list(options.keys()))
     selected = options[selected_label]
 
-    cols = st.columns(4)
+    cols = st.columns(6)
     cols[0].metric("Existe", selected.existe.value)
     cols[1].metric("Operativa", selected.operativa.value)
-    cols[2].metric("Legítima", selected.legitima.value)
-    cols[3].metric("Score", selected.score_confianza)
+    cols[2].metric("Absorbida/adq.", selected.absorbida_adquirida.value)
+    cols[3].metric("Rebranded", selected.rebranded.value)
+    cols[4].metric("Legítima", selected.legitima.value)
+    cols[5].metric("Score", selected.score_confianza)
 
     st.markdown("### Trazabilidad")
     st.write(selected.justificacion_detallada)
@@ -84,6 +86,8 @@ def _render_audit_page() -> None:
             "fuentes": selected.fuentes,
             "banderas_rojas": selected.banderas_rojas,
             "banderas_verdes": selected.banderas_verdes,
+            "absorbida_adquirida": selected.absorbida_adquirida.value,
+            "rebranded": selected.rebranded.value,
             "requiere_revision_manual": selected.requiere_revision_manual,
         }
     )

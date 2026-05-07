@@ -29,6 +29,8 @@ def test_checkpoint_store_builds_csv_and_json() -> None:
         web_verificada="https://acme.example",
         existe="si",
         operativa="si",
+        absorbida_adquirida="no",
+        rebranded="no",
         legitima="si",
         riesgo_fraude="bajo",
         tipologia_riesgo=[],
@@ -56,6 +58,7 @@ def test_checkpoint_store_builds_csv_and_json() -> None:
 
     assert "Acme Corp" in csv_payload
     assert "openai/gpt-4o-mini" in json_payload
+    assert "absorbida_adquirida" in json_payload
 
 
 def test_extract_completed_results_accepts_exported_results_without_record_hash_or_web() -> None:
@@ -67,6 +70,8 @@ def test_extract_completed_results_accepts_exported_results_without_record_hash_
                 "web_verificada": "https://acme.example",
                 "existe": "si",
                 "operativa": "si",
+                "absorbida_adquirida": "no",
+                "rebranded": "no",
                 "legitima": "si",
                 "riesgo_fraude": "bajo",
                 "tipologia_riesgo": "[]",
@@ -89,3 +94,4 @@ def test_extract_completed_results_accepts_exported_results_without_record_hash_
     assert len(records) == 1
     assert records[0]["nombre_empresa"] == "Acme Corp"
     assert records[0]["web_input"] == "https://acme.example"
+    assert records[0]["absorbida_adquirida"] == "no"

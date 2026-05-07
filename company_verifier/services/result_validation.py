@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from company_verifier.models import (
+    BinaryAnswer,
     CompanyInput,
     CompanyVerificationResult,
     LegitimacyAnswer,
@@ -217,6 +218,8 @@ class ResultValidationService:
             web_verificada=web_evidence.get("final_url") or company.web_normalized,
             existe=existe,
             operativa=operativa,
+            absorbida_adquirida=BinaryAnswer.NO,
+            rebranded=BinaryAnswer.NO,
             legitima=legitima,
             riesgo_fraude=risk,
             tipologia_riesgo=risk_types,
