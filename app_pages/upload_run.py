@@ -75,6 +75,44 @@ def _results_to_upload_artifacts(results: list[CompanyVerificationResult]) -> tu
     return frame, validation.model_dump(mode="json"), completed_records
 
 
+def _attach_checkpoint_row_metadata(
+    rows: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows_by_normalized_url = {
+        str(row.get("web_normalized") or "").strip(): dict(row)
+        for row in rows
+        if str(row.get("web_normalized") or "").strip()
+    }
+    completed_records: list[dict[str, Any]] = []
+    for result in results:
+        payload = dict(result)
+        normalized_url = normalize_url(str(payload.get("web_input") or ""))
+        matched_row = rows_by_normalized_url.get(normalized_url)
+        if matched_row:
+            payload.setdefault("record_hash", matched_row.get("record_hash"))
+            payload.setdefault("row_number", matched_row.get("row_number"))
+            payload.setdefault("web", matched_row.get("web"))
+            payload.setdefault("web_normalized", matched_row.get("web_normalized"))
+            payload.setdefault("domain_normalized", matched_row.get("domain_normalized"))
+        completed_records.append(payload)
+    return completed_records
+
+
+def _apply_result_statuses_to_frame(frame: pd.DataFrame, completed_records: list[dict[str, Any]]) -> pd.DataFrame:
+    if frame.empty or "record_hash" not in frame.columns:
+        return frame
+    updated = frame.copy()
+    completed_hashes = {
+        str(record.get("record_hash") or "").strip()
+        for record in completed_records
+        if str(record.get("record_hash") or "").strip()
+    }
+    if completed_hashes:
+        updated.loc[updated["record_hash"].astype(str).isin(completed_hashes), "processing_status"] = "completed"
+    return updated
+
+
 def _resolve_result_record_hash(record: dict[str, Any], result: CompanyVerificationResult) -> str:
     existing_hash = str(record.get("record_hash") or "").strip()
     if existing_hash:
@@ -88,6 +126,11 @@ def _parse_json_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[
     if isinstance(payload, dict) and isinstance(payload.get("rows"), list) and isinstance(payload.get("results"), list):
         checkpoint = _checkpoint_store.load_payload(raw_bytes.decode("utf-8-sig"))
         frame = pd.DataFrame(checkpoint.rows)
+        completed_records = _attach_checkpoint_row_metadata(checkpoint.rows, checkpoint.results)
+        total_rows = checkpoint.metrics.total_rows or len(checkpoint.rows)
+        completed_count = len(completed_records)
+        failed_count = int(checkpoint.metrics.failed_rows or 0)
+        pending_count = max(0, total_rows - completed_count - failed_count)
         validation = UploadValidationResult(
             rows=[CompanyInput.model_validate(row) for row in checkpoint.rows],
             issues=[],
@@ -95,8 +138,14 @@ def _parse_json_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[
             encoding_used="utf-8",
             is_checkpoint_file=True,
         )
-        completed_records = [dict(result) for result in checkpoint.results]
-        return frame, validation.model_dump(mode="json"), completed_records
+        validation_data = validation.model_dump(mode="json")
+        validation_data["checkpoint_status_counts"] = {
+            "completed": completed_count,
+            "pending": pending_count,
+            "failed": failed_count,
+        }
+        validation_data["restored_results_count"] = completed_count
+        return frame, validation_data, completed_records
     results = _export_service.from_json_bytes(raw_bytes)
     return _results_to_upload_artifacts(results)
 
@@ -187,17 +236,20 @@ def _load_upload(file_name: str, raw: bytes, *, file_signature: str, sheet_name:
     st.session_state["uploaded_filename"] = file_name
     st.session_state["uploaded_file_signature"] = file_signature
     st.session_state["uploaded_sheet_name"] = sheet_name
-    st.session_state["source_dataframe"] = frame
     st.session_state["upload_rows"] = validation_rows
 
     restored_results = _export_service.from_flat_records(completed_records)
+    frame = _apply_result_statuses_to_frame(frame, completed_records)
+    st.session_state["source_dataframe"] = frame
     st.session_state["results"] = [item.model_dump(mode="json") for item in restored_results]
     st.session_state["results_by_hash"] = {
         _resolve_result_record_hash(record, model): model.model_dump(mode="json")
         for record, model in zip(completed_records, restored_results, strict=False)
     }
     restored_count = len(restored_results)
-    if "processing_status" in frame.columns:
+    if validation_data.get("checkpoint_status_counts"):
+        status_counts = validation_data["checkpoint_status_counts"]
+    elif "processing_status" in frame.columns:
         status_counts = {
             str(status): int(count)
             for status, count in frame["processing_status"].fillna("").astype(str).value_counts().items()
@@ -331,6 +383,7 @@ def _process_rows_in_background(
                     _enqueue_event(
                         event_queue,
                         "failed",
+                        row_hash=current_row.record_hash,
                         company_name=current_row.nombre_empresa,
                         error=str(exc),
                     )

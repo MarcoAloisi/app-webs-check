@@ -30,6 +30,15 @@ def pending_rows() -> list[CompanyInput]:
     return [row for row in current_rows() if row.record_hash not in done_hashes]
 
 
+def _set_source_row_status(row_hash: str, status: str) -> None:
+    source_frame = st.session_state.get("source_dataframe")
+    if not isinstance(source_frame, pd.DataFrame) or source_frame.empty or "record_hash" not in source_frame.columns:
+        return
+    updated = source_frame.copy()
+    updated.loc[updated["record_hash"].astype(str) == str(row_hash), "processing_status"] = status
+    st.session_state["source_dataframe"] = updated
+
+
 def refresh_checkpoint() -> None:
     results = current_results()
     metrics = get_metrics()
@@ -74,6 +83,7 @@ def _apply_company_result(event: dict[str, Any]) -> None:
     st.session_state["last_processed_hash"] = row_hash
     st.session_state["results_by_hash"] = results_by_hash
     st.session_state["results"] = result_list
+    _set_source_row_status(row_hash, "completed")
 
     metrics = get_metrics()
     settings = get_settings()
@@ -117,6 +127,11 @@ def drain_worker_events() -> None:
         elif event_type == "stopped":
             _finalize_run("stopped", "Ejecución detenida por el usuario.")
         elif event_type == "failed":
+            row_hash = str(event.get("row_hash") or "")
+            if row_hash:
+                _set_source_row_status(row_hash, "failed")
+            metrics = get_metrics()
+            update_metrics(failed_rows=metrics.failed_rows + 1)
             _finalize_run(
                 "failed",
                 f"Error durante el batch ({event['company_name']}): {event['error']}",

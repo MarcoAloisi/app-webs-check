@@ -57,6 +57,7 @@ def test_checkpoint_store_builds_csv_and_json() -> None:
     json_payload = store.build_payload(frame, [result], AppSettings(model="openai/gpt-4o-mini"), VerificationRunMetrics(total_rows=1, processed_rows=1))
 
     assert "Acme Corp" in csv_payload
+    assert "completed" in csv_payload
     assert "openai/gpt-4o-mini" in json_payload
     assert "absorbida_adquirida" in json_payload
 
