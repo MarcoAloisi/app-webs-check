@@ -71,6 +71,15 @@ def _build_issues(row_numbers: Iterable[int], message: str, severity: str = "war
     return ValidationIssue(severity=severity, message=message, row_numbers=list(row_numbers))
 
 
+def _format_duplicate_names(names: Iterable[str], limit: int = 10) -> str:
+    unique_names = [name for name in dict.fromkeys(str(name).strip() for name in names if str(name).strip())]
+    if not unique_names:
+        return ""
+    visible_names = unique_names[:limit]
+    suffix = f" (+{len(unique_names) - limit} más)" if len(unique_names) > limit else ""
+    return ", ".join(visible_names) + suffix
+
+
 def _read_csv_with_fallbacks(decoded: str) -> pd.DataFrame:
     candidates: list[str | None] = [None, ",", ";", "\t", "|"]
     best_frame: pd.DataFrame | None = None
@@ -169,7 +178,11 @@ def _validate_frame(frame: pd.DataFrame, *, encoding: str) -> tuple[pd.DataFrame
     duplicates_removed = int(duplicate_mask.sum())
     if duplicates_removed:
         duplicate_rows = frame.loc[duplicate_mask, "row_number"].astype(int).tolist()
-        issues.append(_build_issues(duplicate_rows, "Duplicados detectados y descartados."))
+        duplicate_names = _format_duplicate_names(frame.loc[duplicate_mask, "nombre_empresa"].tolist())
+        duplicate_message = "Duplicados detectados y descartados."
+        if duplicate_names:
+            duplicate_message = f"{duplicate_message} Empresas duplicadas: {duplicate_names}."
+        issues.append(_build_issues(duplicate_rows, duplicate_message))
         frame = frame.loc[~duplicate_mask].copy()
 
     valid_mask = frame["row_number"].astype(int).isin(invalid_url_rows)

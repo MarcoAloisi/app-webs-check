@@ -16,6 +16,7 @@ def test_csv_validation_removes_duplicates_and_invalid_urls() -> None:
     assert len(frame) == 1
     assert validation.duplicates_removed == 1
     assert any("URL malformada" in issue.message for issue in validation.issues)
+    assert any("Empresas duplicadas: A" in issue.message for issue in validation.issues)
     assert frame.iloc[0]["domain_normalized"] == "example.com"
 
 
