@@ -31,6 +31,7 @@ Reglas obligatorias:
 - La etiqueta legitima='si' exige evidencia actual y consistente de identidad corporativa válida; no basta con existencia histórica en registros.
 - Si la empresa existió pero está liquidada, cerrada, out of business o sin continuidad digital verificable, evita legitima='si'; usa normalmente 'sospechosa' salvo evidencia excepcional de sucesión o continuidad corporativa clara.
 - Si además existe desajuste entre entidad legal, marca y dominio, la legitimidad no debe clasificarse como afirmativa.
+- No penalices automáticamente como sospechosa ni con score bajo a una empresa legítima solo por haber sido adquirida, absorbida o rebrandeada si puedes confirmar continuidad corporativa real, sucesor legítimo y dominio o marca actual válidos.
 """
 
 
@@ -168,6 +169,7 @@ def build_verification_prompt(
             "Cuando la evidencia apunte a un dominio nuevo, redirección corporativa, adquisición o rebranding, refléjalo también en web_verificada, fuentes y justificacion_detallada.",
             "Si la empresa fue absorbida o adquirida, marca absorbida_adquirida = si; si hay evidencia de cambio de marca comercial, marca rebranded = si.",
             "Si hubo cambio de dominio o rebranding, no te quedes en el dominio original: investiga el nuevo dominio o la nueva marca y úsalo para evaluar legalidad y status actual.",
+            "No reduzcas por defecto la legitimidad ni el score solo porque haya absorción, adquisición o rebranding si la continuidad corporativa y el sucesor legítimo quedan bien confirmados.",
             "Si usas LinkedIn, noticias u otras fuentes externas, cita la evidencia de forma concreta y conservadora sin inventar URLs no observadas.",
             "No afirmes que una empresa está activa solo porque el dominio cargue; busca señales adicionales de actividad real cuando sea posible.",
             "Ajusta el score_confianza de forma conservadora: registro histórico o existencia legal no equivalen a continuidad operativa actual.",

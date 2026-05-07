@@ -106,3 +106,60 @@ def test_llm_result_score_is_capped_for_liquidated_inactive_mismatched_company()
     assert result.absorbida_adquirida == "si"
     assert result.rebranded == "no"
     assert result.requiere_revision_manual is True
+
+
+def test_llm_result_keeps_legitimacy_for_confirmed_acquired_successor() -> None:
+    service = ResultValidationService()
+    company = CompanyInput(
+        row_number=8,
+        nombre_empresa="Legacy Corp",
+        web="https://legacy.example",
+        web_normalized="https://legacy.example",
+        domain_normalized="legacy.example",
+        record_hash="legacy-12345678",
+    )
+    envelope = LlmEnvelope(
+        model="openai/gpt-oss-120b:free",
+        prompt="prompt",
+        raw_response="raw",
+        parsed_json={
+            "nombre_empresa": "Legacy Corp",
+            "web_input": "https://legacy.example",
+            "web_verificada": "https://successor.example",
+            "existe": "si",
+            "operativa": "no",
+            "absorbida_adquirida": "si",
+            "rebranded": "no",
+            "legitima": "si",
+            "riesgo_fraude": "bajo",
+            "tipologia_riesgo": ["empresa_adquirida"],
+            "score_confianza": 84,
+            "pasos_verificados": [
+                {"step_number": 1, "name": "Paso 1", "status": "completed", "finding": "Dominio original redirige al sucesor.", "evidence": ["Redirección al sucesor"], "sources": ["https://legacy.example"]},
+                {"step_number": 2, "name": "Paso 2", "status": "completed", "finding": "Contenido reciente en la web sucesora.", "evidence": ["Noticias recientes"], "sources": ["https://successor.example/news"]},
+                {"step_number": 3, "name": "Paso 3", "status": "completed", "finding": "La marca histórica coincide con el anuncio de adquisición.", "evidence": ["Adquisición confirmada"], "sources": ["https://successor.example/about"]},
+                {"step_number": 4, "name": "Paso 4", "status": "completed", "finding": "LinkedIn y noticias confirman continuidad corporativa.", "evidence": ["Perfil corporativo activo"], "sources": ["https://linkedin.com/company/successor"]},
+                {"step_number": 5, "name": "Paso 5", "status": "completed", "finding": "Sin señales de fraude; sucesor legítimo.", "evidence": ["Branding consistente"], "sources": ["https://successor.example"]},
+                {"step_number": 6, "name": "Paso 6", "status": "completed", "finding": "La entidad original fue absorbida, pero el negocio sigue operativo bajo el sucesor.", "evidence": ["Continuidad operativa confirmada"], "sources": ["https://successor.example/about"]},
+                {"step_number": 7, "name": "Paso 7", "status": "completed", "finding": "El dominio sucesor está activo y es legítimo.", "evidence": ["Dominio sucesor activo"], "sources": ["https://successor.example"]},
+            ],
+            "justificacion_detallada": "Legacy Corp fue adquirida y su operación continúa bajo Successor Inc. El dominio sucesor https://successor.example está activo, presenta branding coherente y fuentes externas confirman la continuidad corporativa. No se observan señales de fraude ni ruptura operativa relevante.",
+            "fuentes": [
+                "https://legacy.example",
+                "https://successor.example",
+                "https://linkedin.com/company/successor",
+            ],
+            "banderas_rojas": [],
+            "banderas_verdes": [
+                "Adquisición confirmada por fuentes externas",
+                "Dominio sucesor activo y coherente",
+            ],
+            "requiere_revision_manual": False,
+        },
+    )
+
+    result = service.normalize(company, web_evidence={}, envelope=envelope, manual_review_threshold=70, web_search_enabled=True)
+
+    assert result.legitima == "si"
+    assert result.score_confianza >= 80
+    assert result.riesgo_fraude == "bajo"

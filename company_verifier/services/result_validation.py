@@ -34,6 +34,14 @@ STEP_NAMES = {
 class ResultValidationService:
     """Normalize model responses and create safe fallbacks."""
 
+    def _has_transition_continuity(self, result: CompanyVerificationResult, markers: dict[str, bool]) -> bool:
+        return (
+            (result.absorbida_adquirida == BinaryAnswer.YES or result.rebranded == BinaryAnswer.YES)
+            and bool(result.web_verificada)
+            and not markers["severe_discontinuity"]
+            and not markers["domain_failure"]
+        )
+
     def normalize(
         self,
         company: CompanyInput,
@@ -108,14 +116,15 @@ class ResultValidationService:
 
     def _apply_conservative_legitimacy_guards(self, result: CompanyVerificationResult) -> CompanyVerificationResult:
         markers = self._extract_conservative_markers(result)
+        has_transition_continuity = self._has_transition_continuity(result, markers)
         should_downgrade_legitimacy = False
 
         if result.legitima == LegitimacyAnswer.YES:
             if markers["severe_discontinuity"] and (markers["domain_failure"] or markers["absent_presence"]):
                 should_downgrade_legitimacy = True
-            elif result.operativa == TernaryAnswer.NO and (markers["mismatch"] or markers["absent_presence"]):
+            elif result.operativa == TernaryAnswer.NO and (markers["mismatch"] or markers["absent_presence"]) and not has_transition_continuity:
                 should_downgrade_legitimacy = True
-            elif result.riesgo_fraude == RiskLevel.HIGH:
+            elif result.riesgo_fraude == RiskLevel.HIGH and not has_transition_continuity:
                 should_downgrade_legitimacy = True
 
         if should_downgrade_legitimacy:
@@ -130,10 +139,11 @@ class ResultValidationService:
     def _apply_conservative_score_caps(self, result: CompanyVerificationResult) -> CompanyVerificationResult:
         max_score = 100
         markers = self._extract_conservative_markers(result)
+        has_transition_continuity = self._has_transition_continuity(result, markers)
 
-        if result.operativa == TernaryAnswer.NO:
+        if result.operativa == TernaryAnswer.NO and not has_transition_continuity:
             max_score = min(max_score, 59)
-        if result.requiere_revision_manual and result.riesgo_fraude != RiskLevel.LOW:
+        if result.requiere_revision_manual and result.riesgo_fraude != RiskLevel.LOW and not has_transition_continuity:
             max_score = min(max_score, 69)
         if markers["severe_discontinuity"]:
             max_score = min(max_score, 35)

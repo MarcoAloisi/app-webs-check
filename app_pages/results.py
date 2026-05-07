@@ -16,6 +16,18 @@ from company_verifier.session import get_results_view_source, set_results_view_s
 _export_service = ExportService()
 
 
+def _build_legitimacy_label(record: dict[str, object]) -> str:
+    legitimacy = str(record.get("legitima") or "")
+    labels: list[str] = []
+    if legitimacy:
+        labels.append(legitimacy)
+    if str(record.get("absorbida_adquirida") or "") == "si":
+        labels.append("adquirida")
+    if str(record.get("rebranded") or "") == "si":
+        labels.append("rebranded")
+    return " · ".join(labels) if labels else "indeterminado"
+
+
 @st.cache_data(show_spinner=False)
 def _build_frame(results_data: tuple[str, ...]) -> pd.DataFrame:
     results = [CompanyVerificationResult.model_validate_json(item) for item in results_data]
@@ -142,6 +154,7 @@ def _render_results_page() -> None:
         expected = review_filter == "sí"
         filtered = filtered.loc[filtered["requiere_revision_manual"] == expected]
     filtered = filtered.loc[filtered["score_confianza"].between(score_range[0], score_range[1])]
+    filtered["estado_legitimidad"] = filtered.apply(lambda row: _build_legitimacy_label(row.to_dict()), axis=1)
 
     summary_cols = st.columns(4)
     summary_cols[0].metric("% activas", f"{(frame['operativa'].eq('si').mean() * 100):.1f}%")
@@ -157,7 +170,7 @@ def _render_results_page() -> None:
         "operativa",
         "absorbida_adquirida",
         "rebranded",
-        "legitima",
+        "estado_legitimidad",
         "riesgo_fraude",
         "score_confianza",
         "requiere_revision_manual",

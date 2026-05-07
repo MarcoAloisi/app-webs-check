@@ -10,10 +10,42 @@ import pandas as pd
 from company_verifier.models import CompanyVerificationResult
 
 COMPLEX_COLUMNS = ["tipologia_riesgo", "pasos_verificados", "fuentes", "banderas_rojas", "banderas_verdes"]
+RESULT_EXPORT_COLUMNS = [
+    "nombre_empresa",
+    "web_input",
+    "web_verificada",
+    "existe",
+    "operativa",
+    "absorbida_adquirida",
+    "rebranded",
+    "legitima",
+    "riesgo_fraude",
+    "tipologia_riesgo",
+    "score_confianza",
+    "justificacion_detallada",
+    "fuentes",
+    "banderas_rojas",
+    "banderas_verdes",
+    "requiere_revision_manual",
+    "processing_status",
+]
 
 
 class ExportService:
     """Flatten results and export them to common formats."""
+
+    def _placeholder_steps(self) -> list[dict[str, object]]:
+        return [
+            {
+                "step_number": step_number,
+                "name": f"Paso {step_number}",
+                "status": "not_verifiable",
+                "finding": "No disponible en el archivo exportado.",
+                "evidence": [],
+                "sources": [],
+            }
+            for step_number in range(1, 8)
+        ]
 
     def _coerce_results_payload(self, payload: object) -> list[dict[str, object]]:
         if isinstance(payload, dict):
@@ -38,6 +70,8 @@ class ExportService:
                         payload[column] = []
             if "web_input" not in payload:
                 payload["web_input"] = payload.get("web")
+            if not payload.get("pasos_verificados"):
+                payload["pasos_verificados"] = self._placeholder_steps()
             results.append(CompanyVerificationResult.model_validate(payload))
         return results
 
@@ -67,12 +101,19 @@ class ExportService:
             return pd.DataFrame()
         return pd.DataFrame(rows)
 
-    def to_csv_bytes(self, results: list[CompanyVerificationResult]) -> bytes:
+    def to_results_export_dataframe(self, results: list[CompanyVerificationResult]) -> pd.DataFrame:
         frame = self.to_dataframe(results)
+        if frame.empty:
+            return frame
+        available_columns = [column for column in RESULT_EXPORT_COLUMNS if column in frame.columns]
+        return frame[available_columns].copy()
+
+    def to_csv_bytes(self, results: list[CompanyVerificationResult]) -> bytes:
+        frame = self.to_results_export_dataframe(results)
         return frame.to_csv(index=False).encode("utf-8-sig")
 
     def to_excel_bytes(self, results: list[CompanyVerificationResult]) -> bytes:
-        frame = self.to_dataframe(results)
+        frame = self.to_results_export_dataframe(results)
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             frame.to_excel(writer, sheet_name="resultados", index=False)

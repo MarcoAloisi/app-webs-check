@@ -15,6 +15,15 @@ def _is_suspicious(result: CompanyVerificationResult) -> bool:
     )
 
 
+def _legitimacy_badge(result: CompanyVerificationResult) -> str:
+    labels = [result.legitima.value]
+    if result.absorbida_adquirida.value == "si":
+        labels.append("adquirida")
+    if result.rebranded.value == "si":
+        labels.append("rebranded")
+    return " · ".join(labels)
+
+
 def _render_audit_page() -> None:
     st.subheader("Auditoría por empresa")
     source, serialized_results, source_message = get_results_view_source()
@@ -78,6 +87,7 @@ def _render_audit_page() -> None:
     cols[3].metric("Rebranded", selected.rebranded.value)
     cols[4].metric("Legítima", selected.legitima.value)
     cols[5].metric("Score", selected.score_confianza)
+    st.caption(f"Estado visual: {_legitimacy_badge(selected)}")
 
     st.markdown("### Trazabilidad")
     st.write(selected.justificacion_detallada)

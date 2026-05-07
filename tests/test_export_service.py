@@ -92,3 +92,42 @@ def test_export_service_loads_jsonl_results() -> None:
     assert len(results) == 1
     assert results[0].nombre_empresa == "Acme Corp"
     assert results[0].score_confianza == 78
+
+
+def test_export_service_limits_result_export_columns() -> None:
+    service = ExportService()
+    results = [CompanyVerificationResult.model_validate(_sample_result_payload())]
+
+    frame = service.to_results_export_dataframe(results)
+
+    assert list(frame.columns) == [
+        "nombre_empresa",
+        "web_input",
+        "web_verificada",
+        "existe",
+        "operativa",
+        "absorbida_adquirida",
+        "rebranded",
+        "legitima",
+        "riesgo_fraude",
+        "tipologia_riesgo",
+        "score_confianza",
+        "justificacion_detallada",
+        "fuentes",
+        "banderas_rojas",
+        "banderas_verdes",
+        "requiere_revision_manual",
+        "processing_status",
+    ]
+    assert "pasos_verificados" not in frame.columns
+
+
+def test_export_service_imports_reduced_export_without_steps() -> None:
+    service = ExportService()
+    record = _sample_result_payload()
+    record.pop("pasos_verificados")
+
+    results = service.from_flat_records([record])
+
+    assert len(results) == 1
+    assert len(results[0].pasos_verificados) == 7
