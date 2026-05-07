@@ -69,6 +69,9 @@ class WebEvidenceService:
         except requests.RequestException as exc:
             evidence["error"] = str(exc)
             evidence["ssl_valid"], evidence["ssl_error"] = self._validate_ssl(website)
+        except Exception as exc:  # noqa: BLE001
+            evidence["error"] = f"Fallo inesperado al recopilar evidencia web: {exc}"
+            evidence["ssl_valid"], evidence["ssl_error"] = self._validate_ssl(website)
         return evidence
 
     def _populate_content_fields(self, evidence: dict[str, Any], html: str, base_url: str) -> None:
