@@ -83,14 +83,17 @@ def test_prompt_requires_deep_osint_and_linkedin_checks() -> None:
     assert "LinkedIn corporativo actual" in prompt
     assert "WHOIS" in prompt
     assert "dominio oficial actual, alternativo o sucesor" in prompt
+    assert "dominio sucesor o alternativo parece activo, legítimo y coherente" in prompt
     assert "No te limites a comprobar si la web carga" in prompt
     assert "web_verificada" in prompt
     assert "absorbida_adquirida" in prompt
     assert "rebranded" in prompt
+    assert "investiga ese nuevo dominio o rebranding para comprobar la legalidad" in prompt
 
 
 def test_system_prompt_enforces_conservative_domain_change_analysis() -> None:
     assert "cambio de dominio" in SYSTEM_PROMPT
     assert "LinkedIn" in SYSTEM_PROMPT
     assert "absorbida/adquirida" in SYSTEM_PROMPT
+    assert "investigar también el nuevo dominio o la nueva marca" in SYSTEM_PROMPT
     assert re.search(r"SOLO JSON válido", SYSTEM_PROMPT) is not None

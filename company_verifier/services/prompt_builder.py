@@ -18,6 +18,7 @@ Reglas obligatorias:
 - Prioriza fuentes oficiales o reputadas: sitio oficial, LinkedIn corporativo, noticias fiables, registros mercantiles, directorios empresariales serios y páginas de empleo oficiales.
 - Verifica y explica explícitamente si la empresa fue absorbida/adquirida o si hizo rebranding; si no hay evidencia suficiente, no lo afirmes.
 - Cuando web_search_habilitado sea true, debes investigar en profundidad la empresa detrás del dominio, incluyendo señales de continuidad operativa, rebranding, adquisición, cambio de dominio, redirecciones y presencia actual en LinkedIn.
+- Si detectas cambio de dominio o rebranding, debes investigar también el nuevo dominio o la nueva marca para evaluar su legalidad, continuidad operativa y estatus actual antes de concluir.
 - Si detectas que el dominio actual ya no representa a la empresa original, debes indicarlo explícitamente y tratar de identificar el dominio oficial actual. Si no puedes confirmarlo, indícalo como no identificable.
 - La justificación debe citar evidencias textuales concretas del sitio o de las fuentes entregadas.
 - Si detectas contradicciones, señales de fraude, cambio de titularidad, score bajo o falta de evidencia crítica, requiere_revision_manual debe ser true.
@@ -62,6 +63,7 @@ def build_verification_prompt(
             "Comprueba si la empresa sigue operando mediante LinkedIn corporativo, WHOIS, noticias recientes, ofertas de empleo, directorios empresariales, registros, comunicados oficiales y, cuando aporten señal útil, foros o comunidades públicas.",
             "Verifica expresamente si el dominio cambió de propietario, propósito o marca, o si la empresa migró a otro dominio oficial.",
             "Si detectas un cambio de dominio, rebranding, absorción o adquisición, intenta identificar el dominio principal actual y explica brevemente qué cambió y cuándo pudo ocurrir aproximadamente.",
+            "Si identificas un nuevo dominio o una nueva marca, investiga ese nuevo dominio o rebranding para comprobar la legalidad de la empresa, su continuidad operativa y su estatus actual.",
             "Si no encuentras un dominio nuevo o alternativo fiable para la misma empresa, indícalo explícitamente como no identificado.",
             "Evalúa legitimidad y riesgo con base en señales positivas y red flags: branding consistente, contacto verificable, cobertura reputada, registros fiables, advertencias de phishing, typosquatting, parking o contenido sospechoso.",
             "Si web_search_habilitado es false, no inventes búsquedas externas y limita los pasos externos a la evidencia ya disponible; si es true, úsalo para profundizar especialmente en LinkedIn, noticias y posibles dominios alternativos.",
@@ -127,6 +129,7 @@ def build_verification_prompt(
                 "debes_verificar": [
                     "Si el dominio original dejó de ser el principal o cambió de propósito",
                     "Cuál sería el dominio oficial actual, alternativo o sucesor de la misma empresa",
+                    "Si el dominio sucesor o alternativo parece activo, legítimo y coherente con la empresa actual",
                     "Si no se identifica ninguno, indicarlo de forma explícita",
                 ],
             },
@@ -164,6 +167,7 @@ def build_verification_prompt(
             "El paso 4 solo puede usar búsqueda externa si web_search_habilitado es true; si no, marca not_verifiable.",
             "Cuando la evidencia apunte a un dominio nuevo, redirección corporativa, adquisición o rebranding, refléjalo también en web_verificada, fuentes y justificacion_detallada.",
             "Si la empresa fue absorbida o adquirida, marca absorbida_adquirida = si; si hay evidencia de cambio de marca comercial, marca rebranded = si.",
+            "Si hubo cambio de dominio o rebranding, no te quedes en el dominio original: investiga el nuevo dominio o la nueva marca y úsalo para evaluar legalidad y status actual.",
             "Si usas LinkedIn, noticias u otras fuentes externas, cita la evidencia de forma concreta y conservadora sin inventar URLs no observadas.",
             "No afirmes que una empresa está activa solo porque el dominio cargue; busca señales adicionales de actividad real cuando sea posible.",
             "Ajusta el score_confianza de forma conservadora: registro histórico o existencia legal no equivalen a continuidad operativa actual.",
