@@ -98,7 +98,9 @@ class CompanyVerificationResult(BaseModel):
             return 0
         if isinstance(value, str):
             value = value.strip().replace("%", "")
-        return max(0, min(100, int(value)))
+            if not value:
+                return 0
+        return max(0, min(100, int(float(value))))
 
     @model_validator(mode="after")
     def _ensure_manual_review(self) -> "CompanyVerificationResult":

@@ -15,6 +15,16 @@ COMPLEX_COLUMNS = ["tipologia_riesgo", "pasos_verificados", "fuentes", "banderas
 class ExportService:
     """Flatten results and export them to common formats."""
 
+    def _coerce_results_payload(self, payload: object) -> list[dict[str, object]]:
+        if isinstance(payload, dict):
+            if isinstance(payload.get("results"), list):
+                return [dict(item) for item in payload["results"] if isinstance(item, dict)]
+            if payload.get("nombre_empresa"):
+                return [dict(payload)]
+        if isinstance(payload, list):
+            return [dict(item) for item in payload if isinstance(item, dict)]
+        raise ValueError("Formato JSON no soportado. Usa checkpoint JSON, array JSON de resultados o JSONL exportado.")
+
     def from_flat_records(self, records: list[dict[str, object]]) -> list[CompanyVerificationResult]:
         results: list[CompanyVerificationResult] = []
         for record in records:
@@ -30,6 +40,21 @@ class ExportService:
                 payload["web_input"] = payload.get("web")
             results.append(CompanyVerificationResult.model_validate(payload))
         return results
+
+    def from_json_bytes(self, raw_bytes: bytes) -> list[CompanyVerificationResult]:
+        payload = json.loads(raw_bytes.decode("utf-8-sig"))
+        return self.from_flat_records(self._coerce_results_payload(payload))
+
+    def from_jsonl_bytes(self, raw_bytes: bytes) -> list[CompanyVerificationResult]:
+        records: list[dict[str, object]] = []
+        for line in raw_bytes.decode("utf-8-sig").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise ValueError("El archivo JSONL debe contener un objeto JSON por línea.")
+            records.append(payload)
+        return self.from_flat_records(records)
 
     def to_dataframe(self, results: list[CompanyVerificationResult]) -> pd.DataFrame:
         rows = []

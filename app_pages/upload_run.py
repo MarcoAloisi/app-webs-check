@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import hashlib
+import json
+from pathlib import Path
 import queue
 import threading
 import time
@@ -10,16 +12,18 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from company_verifier.models import AppSettings, CompanyInput, CompanyVerificationResult
+from company_verifier.models import AppSettings, CompanyInput, CompanyVerificationResult, UploadValidationResult
 from company_verifier.run_controller import current_results, drain_worker_events, get_stop_event, pending_rows, refresh_checkpoint, worker_is_running
 from company_verifier.services.cost_estimator import CostEstimatorService
 from company_verifier.services.csv_validation import extract_completed_results, list_sheet_names, load_tabular_bytes
 from company_verifier.services.export_service import ExportService
 from company_verifier.session import append_log, get_metrics, get_settings, reset_run_state, update_metrics
+from company_verifier.storage.checkpoint_store import CheckpointStore
 from company_verifier.utils.web import build_record_hash, extract_domain, normalize_url
 
 _export_service = ExportService()
 _cost_service = CostEstimatorService()
+_checkpoint_store = CheckpointStore()
 
 
 @st.cache_data(show_spinner=False)
@@ -29,9 +33,69 @@ def _sheet_names(file_name: str, raw_bytes: bytes) -> list[str]:
 
 @st.cache_data(show_spinner=False)
 def _parse_upload(file_name: str, raw_bytes: bytes, sheet_name: str | None) -> tuple[pd.DataFrame, dict, list[dict[str, str]]]:
-    frame, validation = load_tabular_bytes(raw_bytes, file_name, sheet_name=sheet_name)
-    completed = extract_completed_results(frame)
-    return frame, validation.model_dump(mode="json"), completed
+    suffix = Path(file_name).suffix.lower()
+    if suffix in {".csv", ".xlsx", ".xls"}:
+        frame, validation = load_tabular_bytes(raw_bytes, file_name, sheet_name=sheet_name)
+        completed = extract_completed_results(frame)
+        return frame, validation.model_dump(mode="json"), completed
+    if suffix == ".json":
+        return _parse_json_upload(raw_bytes)
+    if suffix == ".jsonl":
+        return _parse_jsonl_upload(raw_bytes)
+    raise ValueError("Formato no soportado. Sube un CSV, XLSX, XLS, JSON o JSONL.")
+
+
+def _result_to_row_payload(result: CompanyVerificationResult, row_number: int) -> dict[str, Any]:
+    normalized_url = normalize_url(result.web_input) if result.web_input else "https://unknown.invalid"
+    record_hash = build_record_hash(result.nombre_empresa, normalized_url)
+    return {
+        "row_number": row_number,
+        "nombre_empresa": result.nombre_empresa,
+        "web": result.web_input,
+        "web_normalized": normalized_url,
+        "domain_normalized": extract_domain(normalized_url),
+        "record_hash": record_hash,
+        "processing_status": result.processing_status.value,
+    }
+
+
+def _results_to_upload_artifacts(results: list[CompanyVerificationResult]) -> tuple[pd.DataFrame, dict, list[dict[str, Any]]]:
+    row_payloads = [_result_to_row_payload(result, row_number=index + 2) for index, result in enumerate(results)]
+    frame = pd.DataFrame(row_payloads)
+    completed_records = []
+    for row_payload, result in zip(row_payloads, results, strict=False):
+        completed_records.append({**row_payload, **result.model_dump(mode="json")})
+    validation = UploadValidationResult(
+        rows=[CompanyInput.model_validate(row_payload) for row_payload in row_payloads],
+        issues=[],
+        duplicates_removed=0,
+        encoding_used="utf-8",
+        is_checkpoint_file=True,
+    )
+    return frame, validation.model_dump(mode="json"), completed_records
+
+
+def _parse_json_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[str, Any]]]:
+    payload = json.loads(raw_bytes.decode("utf-8-sig"))
+    if isinstance(payload, dict) and isinstance(payload.get("rows"), list) and isinstance(payload.get("results"), list):
+        checkpoint = _checkpoint_store.load_payload(raw_bytes.decode("utf-8-sig"))
+        frame = pd.DataFrame(checkpoint.rows)
+        validation = UploadValidationResult(
+            rows=[CompanyInput.model_validate(row) for row in checkpoint.rows],
+            issues=[],
+            duplicates_removed=0,
+            encoding_used="utf-8",
+            is_checkpoint_file=True,
+        )
+        completed_records = [dict(result) for result in checkpoint.results]
+        return frame, validation.model_dump(mode="json"), completed_records
+    results = _export_service.from_json_bytes(raw_bytes)
+    return _results_to_upload_artifacts(results)
+
+
+def _parse_jsonl_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[str, Any]]]:
+    results = _export_service.from_jsonl_bytes(raw_bytes)
+    return _results_to_upload_artifacts(results)
 
 
 
@@ -362,7 +426,7 @@ with st.container(border=True):
     with upload_tab:
         uploaded_file = st.file_uploader(
             "Archivo de entrada o checkpoint",
-            type=["csv", "xlsx", "xls"],
+            type=["csv", "xlsx", "xls", "json", "jsonl"],
             disabled=worker_is_running(),
         )
         if uploaded_file is not None:

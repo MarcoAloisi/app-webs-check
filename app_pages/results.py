@@ -42,8 +42,14 @@ def _parse_results_upload(file_name: str, raw_bytes: bytes, sheet_name: str | No
         with pd.ExcelFile(io.BytesIO(raw_bytes), engine="xlrd" if suffix == ".xls" else "openpyxl") as workbook:
             selected_sheet = sheet_name or workbook.sheet_names[0]
             frame = pd.read_excel(workbook, sheet_name=selected_sheet, dtype=str, keep_default_na=False)
+    elif suffix == ".json":
+        results = _export_service.from_json_bytes(raw_bytes)
+        return tuple(result.model_dump_json() for result in results)
+    elif suffix == ".jsonl":
+        results = _export_service.from_jsonl_bytes(raw_bytes)
+        return tuple(result.model_dump_json() for result in results)
     else:
-        raise ValueError("Formato no soportado. Sube un CSV, XLSX o XLS.")
+        raise ValueError("Formato no soportado. Sube un CSV, XLSX, XLS, JSON o JSONL.")
 
     frame = frame.fillna("")
     records = extract_completed_results(frame)
@@ -73,7 +79,7 @@ def _resolve_results_source() -> tuple[tuple[str, ...], str | None]:
 
     uploaded_file = st.file_uploader(
         "Subir resultados exportados o checkpoint",
-        type=["csv", "xlsx", "xls"],
+        type=["csv", "xlsx", "xls", "json", "jsonl"],
         key="results_upload_file",
     )
     if uploaded_file is None:

@@ -95,3 +95,37 @@ def test_extract_completed_results_accepts_exported_results_without_record_hash_
     assert records[0]["nombre_empresa"] == "Acme Corp"
     assert records[0]["web_input"] == "https://acme.example"
     assert records[0]["absorbida_adquirida"] == "no"
+
+
+def test_score_confianza_accepts_float_like_strings() -> None:
+    result = CompanyVerificationResult(
+        nombre_empresa="Acme Corp",
+        web_input="https://acme.example",
+        web_verificada="https://acme.example",
+        existe="si",
+        operativa="si",
+        absorbida_adquirida="no",
+        rebranded="no",
+        legitima="si",
+        riesgo_fraude="bajo",
+        tipologia_riesgo=[],
+        score_confianza="78.0",
+        pasos_verificados=[
+            {
+                "step_number": idx,
+                "name": f"Paso {idx}",
+                "status": "completed",
+                "finding": "ok",
+                "evidence": [],
+                "sources": [],
+            }
+            for idx in range(1, 8)
+        ],
+        justificacion_detallada="Justificación suficientemente larga para la validación del modelo.",
+        fuentes=["https://acme.example"],
+        banderas_rojas=[],
+        banderas_verdes=["SSL válido"],
+        requiere_revision_manual=False,
+    )
+
+    assert result.score_confianza == 78
