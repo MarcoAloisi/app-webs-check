@@ -16,11 +16,16 @@ def _is_suspicious(result: CompanyVerificationResult) -> bool:
 
 
 def _legitimacy_badge(result: CompanyVerificationResult) -> str:
-    labels = [result.legitima.value]
+    legitimacy_badges = {
+        "si": "✅ legítima",
+        "no": "⛔ no legítima",
+        "sospechosa": "⚠️ sospechosa",
+    }
+    labels = [legitimacy_badges.get(result.legitima.value, result.legitima.value)]
     if result.absorbida_adquirida.value == "si":
-        labels.append("adquirida")
+        labels.append("🔁 adquirida")
     if result.rebranded.value == "si":
-        labels.append("rebranded")
+        labels.append("🎨 rebranded")
     return " · ".join(labels)
 
 

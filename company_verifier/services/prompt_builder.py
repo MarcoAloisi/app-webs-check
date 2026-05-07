@@ -24,6 +24,10 @@ Reglas obligatorias:
 - Si detectas contradicciones, señales de fraude, cambio de titularidad, score bajo o falta de evidencia crítica, requiere_revision_manual debe ser true.
 - El score_confianza debe reflejar continuidad operativa y consistencia global, no solo existencia legal histórica.
 - No otorgues scores altos por el mero hecho de encontrar un registro mercantil o una antigua ficha corporativa si la empresa aparece liquidada, cerrada, out of business, sin actividad reciente o con dominio caído.
+- Si el dominio responde pero muestra contenido ajeno, reciclado o no relacionado con la empresa declarada, trátalo como posible secuestro, reutilización o compromiso del sitio y no como evidencia positiva de continuidad digital.
+- La mera existencia de un LinkedIn antiguo no demuestra actividad actual: si no hay empleados visibles, publicaciones recientes ni señales operativas actuales, considéralo evidencia débil o incluso negativa.
+- Si encuentras reportes de scam, phishing, abuso o quejas reputacionales creíbles asociados al dominio o a la web, debes reflejarlo como red flag material aunque la entidad legal exista en registros.
+- Distingue entre entidad legal activa y dominio/web confiables: una empresa puede seguir existiendo legalmente mientras su dominio actual sea sospechoso, comprometido o no representativo.
 - Regla de severidad: si la empresa está liquidada, cerrada, inactiva, out of business o sin continuidad operativa verificable, el score_confianza normalmente debe quedar por debajo de 40.
 - Regla de severidad: si el dominio no resuelve, no hay presencia digital actual fiable y además hay desajuste entre la entidad legal y el dominio o la marca, el score_confianza normalmente debe quedar por debajo de 30.
 - Regla de coherencia: si operativa es 'no', el score_confianza no debe ser alto; evita scores >= 70 salvo evidencia excepcional y muy bien justificada, lo cual será extremadamente raro.
@@ -65,6 +69,9 @@ def build_verification_prompt(
             "Verifica expresamente si el dominio cambió de propietario, propósito o marca, o si la empresa migró a otro dominio oficial.",
             "Si detectas un cambio de dominio, rebranding, absorción o adquisición, intenta identificar el dominio principal actual y explica brevemente qué cambió y cuándo pudo ocurrir aproximadamente.",
             "Si identificas un nuevo dominio o una nueva marca, investiga ese nuevo dominio o rebranding para comprobar la legalidad de la empresa, su continuidad operativa y su estatus actual.",
+            "Si el dominio actual muestra contenido no relacionado con la actividad histórica de la empresa, valora explícitamente secuestro, reutilización, takeover o cambio de propósito del sitio.",
+            "No tomes LinkedIn como evidencia fuerte solo por existir desde hace años: revisa si hay actividad reciente, empleados visibles, posts, interacciones o señales reales de operación actual.",
+            "Busca también señales reputacionales negativas como scam reports, phishing reports, listas de abuso, quejas repetidas o contenido claramente engañoso asociado al dominio.",
             "Si no encuentras un dominio nuevo o alternativo fiable para la misma empresa, indícalo explícitamente como no identificado.",
             "Evalúa legitimidad y riesgo con base en señales positivas y red flags: branding consistente, contacto verificable, cobertura reputada, registros fiables, advertencias de phishing, typosquatting, parking o contenido sospechoso.",
             "Si web_search_habilitado es false, no inventes búsquedas externas y limita los pasos externos a la evidencia ya disponible; si es true, úsalo para profundizar especialmente en LinkedIn, noticias y posibles dominios alternativos.",
@@ -157,7 +164,7 @@ def build_verification_prompt(
                     "sources": ["url"],
                 }
             ],
-            "justificacion_detallada": "3-5 frases con evidencias concretas",
+            "justificacion_detallada": "resumen ejecutivo integral de 4-6 frases con las evidencias más importantes, sin narrar paso por paso",
             "fuentes": ["url o referencia textual"],
             "banderas_rojas": ["str"],
             "banderas_verdes": ["str"],
@@ -166,10 +173,14 @@ def build_verification_prompt(
         "instrucciones": [
             "No concluyas hasta reflejar los 7 pasos.",
             "El paso 4 solo puede usar búsqueda externa si web_search_habilitado es true; si no, marca not_verifiable.",
+            "La salida debe leerse como un resumen ejecutivo de conjunto; evita una narración larga separada por paso.",
+            "En pasos_verificados usa findings breves y estructurados; la explicación principal debe concentrarse en justificacion_detallada.",
             "Cuando la evidencia apunte a un dominio nuevo, redirección corporativa, adquisición o rebranding, refléjalo también en web_verificada, fuentes y justificacion_detallada.",
             "Si la empresa fue absorbida o adquirida, marca absorbida_adquirida = si; si hay evidencia de cambio de marca comercial, marca rebranded = si.",
             "Si hubo cambio de dominio o rebranding, no te quedes en el dominio original: investiga el nuevo dominio o la nueva marca y úsalo para evaluar legalidad y status actual.",
             "No reduzcas por defecto la legitimidad ni el score solo porque haya absorción, adquisición o rebranding si la continuidad corporativa y el sucesor legítimo quedan bien confirmados.",
+            "Si la entidad legal sigue activa pero el dominio actual parece secuestrado, muestra contenido no relacionado, tiene reportes de scam o carece de presencia digital actual creíble, no trates la legitimidad digital como confirmada automáticamente.",
+            "Un LinkedIn antiguo sin actividad reciente ni empleados visibles no basta para concluir operatividad actual.",
             "Si usas LinkedIn, noticias u otras fuentes externas, cita la evidencia de forma concreta y conservadora sin inventar URLs no observadas.",
             "No afirmes que una empresa está activa solo porque el dominio cargue; busca señales adicionales de actividad real cuando sea posible.",
             "Ajusta el score_confianza de forma conservadora: registro histórico o existencia legal no equivalen a continuidad operativa actual.",

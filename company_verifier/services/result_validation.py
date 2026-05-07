@@ -34,6 +34,18 @@ STEP_NAMES = {
 class ResultValidationService:
     """Normalize model responses and create safe fallbacks."""
 
+    def _contains_any_marker(
+        self,
+        text: str,
+        markers: tuple[str, ...],
+        *,
+        negated_phrases: tuple[str, ...] = (),
+    ) -> bool:
+        sanitized_text = text
+        for phrase in negated_phrases:
+            sanitized_text = sanitized_text.replace(phrase, " ")
+        return any(marker in sanitized_text for marker in markers)
+
     def _has_transition_continuity(self, result: CompanyVerificationResult, markers: dict[str, bool]) -> bool:
         return (
             (result.absorbida_adquirida == BinaryAnswer.YES or result.rebranded == BinaryAnswer.YES)
@@ -106,12 +118,49 @@ class ResultValidationService:
             "sin actividad reciente",
             "sin noticias recientes",
             "sin continuidad operativa",
+            "sin empleados",
+            "linkedin desactualizado",
+            "sin publicaciones recientes",
+            "linkedin antiguo sin actividad",
+        )
+        hijack_markers = (
+            "secuestro",
+            "hijack",
+            "sitio secuestrado",
+            "sitio comprometido",
+            "contenido no relacionado",
+            "contenido ajeno",
+            "dominio reutilizado",
+            "cambio de propósito del sitio",
+            "takeover",
+        )
+        scam_markers = (
+            "scam",
+            "phishing",
+            "fraud",
+            "fraude",
+            "abuse",
+            "malware",
+            "engañoso",
+            "sitio malicioso",
         )
         return {
-            "severe_discontinuity": any(marker in combined_text for marker in severe_discontinuity_markers),
-            "domain_failure": any(marker in combined_text for marker in domain_failure_markers),
-            "mismatch": any(marker in combined_text for marker in mismatch_markers),
-            "absent_presence": any(marker in combined_text for marker in absent_presence_markers),
+            "severe_discontinuity": self._contains_any_marker(combined_text, severe_discontinuity_markers),
+            "domain_failure": self._contains_any_marker(combined_text, domain_failure_markers),
+            "mismatch": self._contains_any_marker(combined_text, mismatch_markers),
+            "absent_presence": self._contains_any_marker(combined_text, absent_presence_markers),
+            "hijacked_or_repurposed": self._contains_any_marker(combined_text, hijack_markers),
+            "scam_signal": self._contains_any_marker(
+                combined_text,
+                scam_markers,
+                negated_phrases=(
+                    "sin señales de fraude",
+                    "no se observan señales de fraude",
+                    "sin fraude",
+                    "sin señales de scam",
+                    "sin phishing",
+                ),
+            ),
         }
 
     def _apply_conservative_legitimacy_guards(self, result: CompanyVerificationResult) -> CompanyVerificationResult:
@@ -123,6 +172,8 @@ class ResultValidationService:
             if markers["severe_discontinuity"] and (markers["domain_failure"] or markers["absent_presence"]):
                 should_downgrade_legitimacy = True
             elif result.operativa == TernaryAnswer.NO and (markers["mismatch"] or markers["absent_presence"]) and not has_transition_continuity:
+                should_downgrade_legitimacy = True
+            elif (markers["hijacked_or_repurposed"] or markers["scam_signal"]) and not has_transition_continuity:
                 should_downgrade_legitimacy = True
             elif result.riesgo_fraude == RiskLevel.HIGH and not has_transition_continuity:
                 should_downgrade_legitimacy = True
@@ -145,11 +196,17 @@ class ResultValidationService:
             max_score = min(max_score, 59)
         if result.requiere_revision_manual and result.riesgo_fraude != RiskLevel.LOW and not has_transition_continuity:
             max_score = min(max_score, 69)
+        if markers["hijacked_or_repurposed"]:
+            max_score = min(max_score, 55)
+        if markers["scam_signal"]:
+            max_score = min(max_score, 50)
         if markers["severe_discontinuity"]:
             max_score = min(max_score, 35)
         if result.operativa == TernaryAnswer.NO and markers["domain_failure"]:
             max_score = min(max_score, 30)
         if markers["mismatch"] and markers["absent_presence"]:
+            max_score = min(max_score, 45)
+        if markers["hijacked_or_repurposed"] and markers["absent_presence"]:
             max_score = min(max_score, 45)
 
         result.score_confianza = min(result.score_confianza, max_score)

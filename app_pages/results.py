@@ -19,12 +19,17 @@ _export_service = ExportService()
 def _build_legitimacy_label(record: dict[str, object]) -> str:
     legitimacy = str(record.get("legitima") or "")
     labels: list[str] = []
+    legitimacy_badges = {
+        "si": "✅ legítima",
+        "no": "⛔ no legítima",
+        "sospechosa": "⚠️ sospechosa",
+    }
     if legitimacy:
-        labels.append(legitimacy)
+        labels.append(legitimacy_badges.get(legitimacy, legitimacy))
     if str(record.get("absorbida_adquirida") or "") == "si":
-        labels.append("adquirida")
+        labels.append("🔁 adquirida")
     if str(record.get("rebranded") or "") == "si":
-        labels.append("rebranded")
+        labels.append("🎨 rebranded")
     return " · ".join(labels) if labels else "indeterminado"
 
 

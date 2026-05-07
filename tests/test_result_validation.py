@@ -163,3 +163,67 @@ def test_llm_result_keeps_legitimacy_for_confirmed_acquired_successor() -> None:
     assert result.legitima == "si"
     assert result.score_confianza >= 80
     assert result.riesgo_fraude == "bajo"
+
+
+def test_llm_result_downgrades_hijacked_domain_with_scam_and_stale_linkedin() -> None:
+    service = ResultValidationService()
+    company = CompanyInput(
+        row_number=9,
+        nombre_empresa="Tooteko Srls",
+        web="https://tooteko.com",
+        web_normalized="https://tooteko.com",
+        domain_normalized="tooteko.com",
+        record_hash="tooteko-12345678",
+    )
+    envelope = LlmEnvelope(
+        model="openai/gpt-oss-120b:free",
+        prompt="prompt",
+        raw_response="raw",
+        parsed_json={
+            "nombre_empresa": "Tooteko Srls",
+            "web_input": "https://tooteko.com",
+            "web_verificada": None,
+            "existe": "si",
+            "operativa": "si",
+            "absorbida_adquirida": "no",
+            "rebranded": "no",
+            "legitima": "si",
+            "riesgo_fraude": "medio",
+            "tipologia_riesgo": ["posible_sitio_secuestrado", "phishing_moderado"],
+            "score_confianza": 78,
+            "pasos_verificados": [
+                {"step_number": 1, "name": "Paso 1", "status": "completed", "finding": "El dominio responde pero muestra contenido deportivo no relacionado.", "evidence": ["Contenido no relacionado"], "sources": ["https://tooteko.com"]},
+                {"step_number": 2, "name": "Paso 2", "status": "completed", "finding": "Sin señales consistentes de actualización corporativa reciente.", "evidence": ["Contenido ajeno a la actividad histórica"], "sources": ["https://tooteko.com"]},
+                {"step_number": 3, "name": "Paso 3", "status": "completed", "finding": "La entidad legal existe, pero el sitio actual no coincide con su actividad.", "evidence": ["Mismatch dominio-entidad"], "sources": ["https://registro.example"]},
+                {"step_number": 4, "name": "Paso 4", "status": "completed", "finding": "LinkedIn existe desde 2014, pero sin empleados visibles ni actividad reciente.", "evidence": ["LinkedIn antiguo sin actividad", "Sin empleados"], "sources": ["https://linkedin.com/company/tooteko"]},
+                {"step_number": 5, "name": "Paso 5", "status": "completed", "finding": "Hay reportes asociando la web a scam y posible phishing moderado.", "evidence": ["Scam reports"], "sources": ["https://forum.example/report"]},
+                {"step_number": 6, "name": "Paso 6", "status": "completed", "finding": "La entidad legal sigue activa en registros italianos.", "evidence": ["Registro mercantil activo"], "sources": ["https://registro.example"]},
+                {"step_number": 7, "name": "Paso 7", "status": "completed", "finding": "No se confirmó un dominio alternativo legítimo actual.", "evidence": ["Sin dominio sucesor confirmado"], "sources": ["https://tooteko.com"]},
+            ],
+            "justificacion_detallada": "Tooteko Srls sigue activa en registros, pero tooteko.com muestra contenido no relacionado con la empresa y esto sugiere posible secuestro o reutilización del sitio. El LinkedIn histórico no aporta continuidad actual porque no muestra empleados visibles ni actividad reciente. Además existen señales reputacionales de scam asociadas a la web, por lo que la legitimidad digital no puede darse por confirmada y el riesgo debe mantenerse al menos moderado.",
+            "fuentes": [
+                "https://tooteko.com",
+                "https://linkedin.com/company/tooteko",
+                "https://registro.example",
+                "https://forum.example/report",
+            ],
+            "banderas_rojas": [
+                "Contenido no relacionado con la empresa",
+                "Posible sitio secuestrado",
+                "LinkedIn antiguo sin actividad",
+                "Sin empleados visibles",
+                "Scam reports asociados al dominio",
+            ],
+            "banderas_verdes": [
+                "Entidad legal activa en registros italianos",
+            ],
+            "requiere_revision_manual": True,
+        },
+    )
+
+    result = service.normalize(company, web_evidence={}, envelope=envelope, manual_review_threshold=70, web_search_enabled=True)
+
+    assert result.legitima == "sospechosa"
+    assert result.score_confianza <= 50
+    assert result.riesgo_fraude == "medio"
+    assert result.requiere_revision_manual is True
