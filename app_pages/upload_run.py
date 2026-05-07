@@ -75,6 +75,14 @@ def _results_to_upload_artifacts(results: list[CompanyVerificationResult]) -> tu
     return frame, validation.model_dump(mode="json"), completed_records
 
 
+def _resolve_result_record_hash(record: dict[str, Any], result: CompanyVerificationResult) -> str:
+    existing_hash = str(record.get("record_hash") or "").strip()
+    if existing_hash:
+        return existing_hash
+    normalized_url = normalize_url(result.web_input) if result.web_input else "https://unknown.invalid"
+    return build_record_hash(result.nombre_empresa, normalized_url)
+
+
 def _parse_json_upload(raw_bytes: bytes) -> tuple[pd.DataFrame, dict, list[dict[str, Any]]]:
     payload = json.loads(raw_bytes.decode("utf-8-sig"))
     if isinstance(payload, dict) and isinstance(payload.get("rows"), list) and isinstance(payload.get("results"), list):
@@ -181,16 +189,27 @@ def _load_upload(file_name: str, raw: bytes, *, file_signature: str, sheet_name:
     st.session_state["uploaded_sheet_name"] = sheet_name
     st.session_state["source_dataframe"] = frame
     st.session_state["upload_rows"] = validation_rows
-    st.session_state["validation_summary"] = validation_data
-    st.session_state["upload_issues"] = validation_data.get("issues", [])
 
     restored_results = _export_service.from_flat_records(completed_records)
     st.session_state["results"] = [item.model_dump(mode="json") for item in restored_results]
     st.session_state["results_by_hash"] = {
-        record["record_hash"]: model.model_dump(mode="json")
+        _resolve_result_record_hash(record, model): model.model_dump(mode="json")
         for record, model in zip(completed_records, restored_results, strict=False)
     }
     restored_count = len(restored_results)
+    if "processing_status" in frame.columns:
+        status_counts = {
+            str(status): int(count)
+            for status, count in frame["processing_status"].fillna("").astype(str).value_counts().items()
+            if str(status).strip()
+        }
+    else:
+        status_counts = {}
+    validation_data["restored_results_count"] = restored_count
+    validation_data["checkpoint_status_counts"] = status_counts
+    st.session_state["validation_summary"] = validation_data
+    st.session_state["upload_issues"] = validation_data.get("issues", [])
+
     update_metrics(
         total_rows=len(validation_rows),
         processed_rows=restored_count,
@@ -530,6 +549,16 @@ def _render_live_panel() -> None:
     if issues:
         st.warning("Se detectaron incidencias en la carga.")
         st.dataframe(pd.DataFrame(issues), width="stretch", hide_index=True)
+
+    checkpoint_status_counts = validation.get("checkpoint_status_counts") or {}
+    restored_results_count = int(validation.get("restored_results_count") or 0)
+    if checkpoint_status_counts or restored_results_count:
+        st.info("Resumen del archivo cargado")
+        summary_cols = st.columns(4)
+        summary_cols[0].metric("Completed", int(checkpoint_status_counts.get("completed", 0)))
+        summary_cols[1].metric("Pending", int(checkpoint_status_counts.get("pending", 0)))
+        summary_cols[2].metric("Failed", int(checkpoint_status_counts.get("failed", 0)))
+        summary_cols[3].metric("Restaurados", restored_results_count)
 
     if st.session_state.get("checkpoint_ready"):
         st.success("Hay un checkpoint actualizado listo para descarga.")
