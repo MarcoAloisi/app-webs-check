@@ -59,7 +59,7 @@ def test_export_service_loads_checkpoint_json_results() -> None:
                 "web_search_context_size": "medium",
                 "web_search_allowed_domains": [],
                 "web_search_excluded_domains": [],
-                "checkpoint_interval": 500,
+                "checkpoint_interval": 200,
             },
             "metrics": {
                 "processed_rows": 1,

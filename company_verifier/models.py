@@ -138,7 +138,7 @@ class AppSettings(BaseModel):
     web_search_context_size: str = "medium"
     web_search_allowed_domains: list[str] = Field(default_factory=list)
     web_search_excluded_domains: list[str] = Field(default_factory=list)
-    checkpoint_interval: int = Field(default=500, ge=50)
+    checkpoint_interval: int = Field(default=200, ge=50)
 
 
 class UploadValidationResult(BaseModel):
